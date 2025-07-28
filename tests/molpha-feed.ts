@@ -1,0 +1,280 @@
+import * as anchor from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
+import { MolphaFeed } from "../target/types/molpha_feed";
+import { assert } from "chai";
+import {
+  Keypair,
+  SystemProgram,
+  PublicKey,
+} from "@solana/web3.js";
+
+describe("molpha-feed", () => {
+  const provider = anchor.AnchorProvider.env();
+  anchor.setProvider(provider);
+
+  const feedProgram = anchor.workspace.MolphaFeed as Program<MolphaFeed>;
+  const authority = provider.wallet as anchor.Wallet;
+
+  const [protocolConfigPDA] = PublicKey.findProgramAddressSync(
+    [Buffer.from("config")],
+    feedProgram.programId
+  );
+
+  before(async () => {
+    // Initialize the protocol config
+    try {
+        await feedProgram.methods
+        .initializeProtocol(new anchor.BN(1000)) // 1000 lamports per update
+        .accounts({
+            protocolConfig: protocolConfigPDA,
+            authority: authority.publicKey,
+            systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+    } catch (e) {
+        // Ignore error if already initialized
+    }
+  });
+
+  it("Creates a new public feed", async () => {
+    const feedId = "public-feed-for-create";
+    const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("feed"), authority.publicKey.toBuffer(), Buffer.from(feedId)],
+        feedProgram.programId
+      );
+    await feedProgram.methods
+      .createFeed({
+        feedId,
+        feedType: { public: {} },
+        minSignaturesThreshold: 1,
+        frequency: new anchor.BN(60),
+        ipfsCid: "cid",
+      })
+      .accounts({
+        feedAccount: feedAccountPDA,
+        authority: authority.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+    
+    const feedAccount = await feedProgram.account.feedAccount.fetch(feedAccountPDA);
+    assert.ok(feedAccount.authority.equals(authority.publicKey));
+    assert.deepEqual(feedAccount.feedType, { public: {} });
+    assert.equal(feedAccount.minSignaturesThreshold, 1);
+    assert.equal(feedAccount.frequency.toNumber(), 60);
+    assert.equal(feedAccount.ipfsCid, "cid");
+  });
+
+  it("Updates a personal feed's config", async () => {
+    const personalFeedId = "personal-feed-for-update";
+    const [personalFeedPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("feed"), authority.publicKey.toBuffer(), Buffer.from(personalFeedId)],
+        feedProgram.programId
+      );
+    
+    await feedProgram.methods
+        .createFeed({
+            feedId: personalFeedId,
+            feedType: { personal: {} },
+            minSignaturesThreshold: 1,
+            frequency: new anchor.BN(30),
+            ipfsCid: "personal_initial_cid",
+        })
+        .accounts({
+            feedAccount: personalFeedPDA,
+            authority: authority.publicKey,
+            systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+
+    const updateParams = {
+        minSignaturesThreshold: 5,
+        frequency: new anchor.BN(120),
+        ipfsCid: "personal_updated_cid",
+    };
+    await feedProgram.methods
+      .updateFeedConfig(updateParams)
+      .accounts({
+        feedAccount: personalFeedPDA,
+        authority: authority.publicKey,
+      })
+      .rpc();
+
+    const feedAccount = await feedProgram.account.feedAccount.fetch(personalFeedPDA);
+    assert.equal(feedAccount.minSignaturesThreshold, 5);
+    assert.equal(feedAccount.frequency.toNumber(), 120);
+    assert.equal(feedAccount.ipfsCid, "personal_updated_cid");
+  });
+
+  it("Fails to update a public feed's config", async () => {
+    const feedId = "public-feed-for-fail-update";
+    const [publicFeedPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("feed"), authority.publicKey.toBuffer(), Buffer.from(feedId)],
+        feedProgram.programId
+    );
+    await feedProgram.methods
+      .createFeed({
+        feedId,
+        feedType: { public: {} },
+        minSignaturesThreshold: 1,
+        frequency: new anchor.BN(60),
+        ipfsCid: "cid",
+      })
+      .accounts({
+        feedAccount: publicFeedPDA,
+        authority: authority.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+    
+    const updateParams = {
+        minSignaturesThreshold: 5,
+        frequency: new anchor.BN(120),
+        ipfsCid: "updated_cid",
+    };
+    try {
+      await feedProgram.methods
+        .updateFeedConfig(updateParams)
+        .accounts({
+          feedAccount: publicFeedPDA,
+          authority: authority.publicKey,
+        })
+        .rpc();
+      assert.fail("Should have failed to update a public feed.");
+    } catch (error) {
+      assert.equal(error.error.errorCode.code, "NotSupported");
+    }
+  });
+
+  it("Fails to create a feed with an empty CID", async () => {
+    const feedId = "empty-cid-feed";
+    const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from("feed"), authority.publicKey.toBuffer(), Buffer.from(feedId)],
+      feedProgram.programId
+    );
+    const params = {
+        feedId,
+        feedType: { public: {} },
+        minSignaturesThreshold: 1,
+        frequency: new anchor.BN(60),
+        ipfsCid: "", // Empty CID
+      };
+  
+      try {
+        await feedProgram.methods
+          .createFeed(params)
+          .accounts({
+            feedAccount: feedAccountPDA,
+            authority: authority.publicKey,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+        assert.fail("Should have failed with an empty CID.");
+      } catch (error) {
+        assert.equal(error.error.errorCode.code, "InvalidFeedConfig");
+      }
+  });
+
+  it("Fails to create a feed with zero signatures required", async () => {
+    const feedId = "zero-sig-feed";
+    const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from("feed"), authority.publicKey.toBuffer(), Buffer.from(feedId)],
+      feedProgram.programId
+    );
+    const params = {
+        feedId,
+        feedType: { public: {} },
+        minSignaturesThreshold: 0, // Zero signatures
+        frequency: new anchor.BN(60),
+        ipfsCid: "some_cid",
+      };
+  
+      try {
+        await feedProgram.methods
+          .createFeed(params)
+          .accounts({
+            feedAccount: feedAccountPDA,
+            authority: authority.publicKey,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+        assert.fail("Should have failed with zero signatures required.");
+      } catch (error) {
+        assert.equal(error.error.errorCode.code, "InvalidFeedConfig");
+      }
+  });
+
+  describe("Subscriptions", () => {
+    const personalFeedId = "personal-feed-for-subs";
+    let personalFeedPDA: PublicKey;
+    
+    before(async () => {
+      // Create a personal feed for subscription tests
+      [personalFeedPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("feed"), authority.publicKey.toBuffer(), Buffer.from(personalFeedId)],
+        feedProgram.programId
+      );
+      try {
+        await feedProgram.methods
+            .createFeed({
+            feedId: personalFeedId,
+            feedType: { personal: {} },
+            minSignaturesThreshold: 1,
+            frequency: new anchor.BN(60),
+            ipfsCid: "personal_cid",
+            })
+            .accounts({
+            feedAccount: personalFeedPDA,
+            authority: authority.publicKey,
+            systemProgram: SystemProgram.programId,
+            })
+            .rpc();
+        } catch (e) {
+            // Ignore error if already created
+        }
+    });
+
+    it("Creates a new subscription for the feed owner", async () => {
+        const [subscriptionPDA] = PublicKey.findProgramAddressSync(
+            [Buffer.from("subscription"), authority.publicKey.toBuffer(), personalFeedPDA.toBuffer()],
+            feedProgram.programId
+        );
+    
+        await feedProgram.methods
+            .subscribe()
+            .accounts({
+            subscriptionAccount: subscriptionPDA,
+            feedAccount: personalFeedPDA,
+            consumer: authority.publicKey,
+            payer: authority.publicKey,
+            authority: authority.publicKey,
+            systemProgram: SystemProgram.programId,
+            })
+            .rpc();
+    
+        const subscriptionAccount = await feedProgram.account.subscriptionAccount.fetch(subscriptionPDA);
+        assert.ok(subscriptionAccount.owner.equals(authority.publicKey));
+        assert.equal(subscriptionAccount.balance.toNumber(), 0);
+    });
+
+    it("Tops up a subscription", async () => {
+        const [subscriptionPDA] = PublicKey.findProgramAddressSync(
+            [Buffer.from("subscription"), authority.publicKey.toBuffer(), personalFeedPDA.toBuffer()],
+            feedProgram.programId
+        );
+        const topUpAmount = new anchor.BN(100000); // 0.0001 SOL
+    
+        await feedProgram.methods
+            .topUp(topUpAmount)
+            .accounts({
+            subscriptionAccount: subscriptionPDA,
+            owner: authority.publicKey,
+            systemProgram: SystemProgram.programId,
+            })
+            .rpc();
+    
+        const subscriptionAccount = await feedProgram.account.subscriptionAccount.fetch(subscriptionPDA);
+        assert.equal(subscriptionAccount.balance.toNumber(), topUpAmount.toNumber());
+    });
+  });
+}); 
