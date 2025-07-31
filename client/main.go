@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gagliardetto/solana-go"
@@ -29,21 +31,24 @@ type Answer struct {
 
 // OracleClient represents the oracle client
 type OracleClient struct {
-	rpcClient   *rpc.Client
-	nodeKeypair solana.PrivateKey
-	payerKey    solana.PrivateKey
+	rpcClient    *rpc.Client
+	nodeKeypairs []solana.PrivateKey // Changed to slice to support multiple nodes
+	payerKey     solana.PrivateKey
 }
 
-// NewOracleClient creates a new oracle client
-func NewOracleClient(rpcEndpoint string, nodePrivateKey, payerPrivateKey string) (*OracleClient, error) {
+// NewOracleClient creates a new oracle client with multiple nodes
+func NewOracleClient(rpcEndpoint string, nodePrivateKeys []string, payerPrivateKey string) (*OracleClient, error) {
 	client := rpc.New(rpcEndpoint)
 
-	// Decode the node private key
-	nodeKeyBytes, err := base58.Decode(nodePrivateKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode node private key: %v", err)
+	// Decode multiple node private keys
+	nodeKeypairs := make([]solana.PrivateKey, len(nodePrivateKeys))
+	for i, nodePrivateKey := range nodePrivateKeys {
+		nodeKeyBytes, err := base58.Decode(nodePrivateKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode node private key %d: %v", i, err)
+		}
+		nodeKeypairs[i] = solana.PrivateKey(nodeKeyBytes)
 	}
-	nodeKeypair := solana.PrivateKey(nodeKeyBytes)
 
 	// Decode the payer private key
 	payerKeyBytes, err := base58.Decode(payerPrivateKey)
@@ -53,9 +58,9 @@ func NewOracleClient(rpcEndpoint string, nodePrivateKey, payerPrivateKey string)
 	payerKey := solana.PrivateKey(payerKeyBytes)
 
 	return &OracleClient{
-		rpcClient:   client,
-		nodeKeypair: nodeKeypair,
-		payerKey:    payerKey,
+		rpcClient:    client,
+		nodeKeypairs: nodeKeypairs,
+		payerKey:     payerKey,
 	}, nil
 }
 
@@ -65,18 +70,24 @@ func GenerateKeypair() (solana.PrivateKey, solana.PublicKey) {
 	return account.PrivateKey, account.PublicKey()
 }
 
-// SignMessage signs a message with the node's private key
-func (oc *OracleClient) SignMessage(message []byte) []byte {
-	signature := ed25519.Sign(ed25519.PrivateKey(oc.nodeKeypair), message)
+// SignMessage signs a message with a specific node's private key
+func (oc *OracleClient) SignMessage(message []byte, nodeIndex int) []byte {
+	if nodeIndex >= len(oc.nodeKeypairs) {
+		panic(fmt.Sprintf("Invalid node index: %d", nodeIndex))
+	}
+	signature := ed25519.Sign(ed25519.PrivateKey(oc.nodeKeypairs[nodeIndex]), message)
 	return signature
 }
 
-// CreateEd25519VerifyInstruction creates an Ed25519 signature verification instruction
-func (oc *OracleClient) CreateEd25519VerifyInstruction(message []byte, signature []byte) solana.Instruction {
+// CreateEd25519VerifyInstruction creates an Ed25519 signature verification instruction for a specific node
+func (oc *OracleClient) CreateEd25519VerifyInstruction(message []byte, signature []byte, nodeIndex int) solana.Instruction {
 	// Ed25519 instruction data format according to Solana specs
 	// Header (16 bytes) + signature (64 bytes) + pubkey (32 bytes) + message
 
-	pubkey := oc.nodeKeypair.PublicKey()
+	if nodeIndex >= len(oc.nodeKeypairs) {
+		panic(fmt.Sprintf("Invalid node index: %d", nodeIndex))
+	}
+	pubkey := oc.nodeKeypairs[nodeIndex].PublicKey()
 
 	// Calculate offsets
 	headerSize := uint16(16)
@@ -111,9 +122,14 @@ func (oc *OracleClient) CreateEd25519VerifyInstruction(message []byte, signature
 	)
 }
 
-// PublishAnswer publishes an oracle answer to the feed
+// PublishAnswer publishes an oracle answer to the feed with multiple node signatures
 func (oc *OracleClient) PublishAnswer(feedID string, feedAuthority solana.PublicKey, answer Answer, minSignatures uint8) error {
 	ctx := context.Background()
+
+	// Validate that we have enough nodes to meet the minimum signature requirement
+	if len(oc.nodeKeypairs) < int(minSignatures) {
+		return fmt.Errorf("not enough nodes (%d) to meet minimum signature requirement (%d)", len(oc.nodeKeypairs), minSignatures)
+	}
 
 	// Create message to sign (this should match your oracle's message format)
 	messageData := struct {
@@ -131,11 +147,16 @@ func (oc *OracleClient) PublishAnswer(feedID string, feedAuthority solana.Public
 		return fmt.Errorf("failed to marshal message: %v", err)
 	}
 
-	// Sign the message
-	signature := oc.SignMessage(messageBytes)
+	// Create Ed25519 verification instructions for all nodes
+	var ed25519Instructions []solana.Instruction
+	for i := 0; i < len(oc.nodeKeypairs); i++ {
+		// Sign the message with each node
+		signature := oc.SignMessage(messageBytes, i)
 
-	// Create Ed25519 verification instruction
-	ed25519Instruction := oc.CreateEd25519VerifyInstruction(messageBytes, signature)
+		// Create Ed25519 verification instruction for this node
+		ed25519Instruction := oc.CreateEd25519VerifyInstruction(messageBytes, signature, i)
+		ed25519Instructions = append(ed25519Instructions, ed25519Instruction)
+	}
 
 	// Find PDAs
 	nodeRegistryPDA, _, err := solana.FindProgramAddress(
@@ -223,12 +244,12 @@ func (oc *OracleClient) PublishAnswer(feedID string, feedAuthority solana.Public
 		return fmt.Errorf("failed to get latest blockhash: %v", err)
 	}
 
+	// Build the complete instruction list: all Ed25519 instructions + verify_signatures instruction
+	allInstructions := append(ed25519Instructions, verifyInstruction)
+
 	// Create transaction
 	tx, err := solana.NewTransaction(
-		[]solana.Instruction{
-			ed25519Instruction,
-			verifyInstruction,
-		},
+		allInstructions,
 		recent.Value.Blockhash,
 		solana.TransactionPayer(oc.payerKey.PublicKey()),
 	)
@@ -253,7 +274,7 @@ func (oc *OracleClient) PublishAnswer(feedID string, feedAuthority solana.Public
 		return fmt.Errorf("failed to send transaction: %v", err)
 	}
 
-	fmt.Printf("Transaction sent: %s\n", sig)
+	fmt.Printf("Transaction sent with %d node signatures: %s\n", len(oc.nodeKeypairs), sig)
 
 	// Wait for confirmation
 	return oc.waitForConfirmation(ctx, sig)
@@ -280,11 +301,19 @@ func (oc *OracleClient) waitForConfirmation(ctx context.Context, signature solan
 	return fmt.Errorf("transaction not confirmed within timeout")
 }
 
+// parseUint8 safely parses a string to uint8
+func parseUint8(s string) uint8 {
+	if val, err := strconv.ParseUint(s, 10, 8); err == nil {
+		return uint8(val)
+	}
+	return 0
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage:")
 		fmt.Println("  generate-keypair                           - Generate a new keypair")
-		fmt.Println("  publish <feed_id> <value> <node_key> <payer_key> [authority_key] - Publish oracle data")
+		fmt.Println("  publish <feed_id> <value> <node_key1[,node_key2,...]> <payer_private_key> [feed_authority_key] - Publish oracle data with multiple node signatures")
 		os.Exit(1)
 	}
 
@@ -298,14 +327,31 @@ func main() {
 
 	case "publish":
 		if len(os.Args) < 6 {
-			fmt.Println("Usage: publish <feed_id> <value> <node_private_key> <payer_private_key> [feed_authority_key]")
+			fmt.Println("Usage: publish <feed_id> <value> <node_key1[,node_key2,...]> <payer_private_key> [feed_authority_key]")
+			fmt.Println("Examples:")
+			fmt.Println("  Single node:    publish feed1 hello node_key payer_key")
+			fmt.Println("  Multiple nodes: publish feed1 hello node_key1,node_key2,node_key3 payer_key")
 			os.Exit(1)
 		}
 
 		feedID := os.Args[2]
 		value := os.Args[3]
-		nodeKey := os.Args[4]
+		nodeKeysStr := os.Args[4]
 		payerKey := os.Args[5]
+
+		// Parse multiple node keys (comma-separated)
+		nodeKeys := strings.Split(nodeKeysStr, ",")
+		if len(nodeKeys) == 0 {
+			log.Fatalf("At least one node key is required")
+		}
+
+		// Clean up the node keys (remove whitespace)
+		for i := range nodeKeys {
+			nodeKeys[i] = strings.TrimSpace(nodeKeys[i])
+			if nodeKeys[i] == "" {
+				log.Fatalf("Empty node key found at position %d", i)
+			}
+		}
 
 		// Default to payer as feed authority if not provided
 		authorityKey := payerKey
@@ -325,8 +371,8 @@ func main() {
 			authorityPubkey = authorityPrivKey.PublicKey()
 		}
 
-		// Create client
-		client, err := NewOracleClient("http://127.0.0.1:8899", nodeKey, payerKey)
+		// Create client with multiple nodes
+		client, err := NewOracleClient("http://127.0.0.1:8899", nodeKeys, payerKey)
 		if err != nil {
 			log.Fatalf("Failed to create client: %v", err)
 		}
@@ -346,8 +392,20 @@ func main() {
 			Timestamp: time.Now().Unix() - 30, // Subtract 30 seconds to ensure it's in the past relative to validator clock
 		}
 
+		// Calculate minimum signatures needed
+		minSignatures := uint8(len(nodeKeys)) // Default: require all nodes to sign
+
+		// Allow override via environment variable for testing
+		if minSigStr := os.Getenv("MIN_SIGNATURES"); minSigStr != "" {
+			if minSig := parseUint8(minSigStr); minSig > 0 && minSig <= uint8(len(nodeKeys)) {
+				minSignatures = minSig
+			}
+		}
+
+		fmt.Printf("Publishing answer with %d node signatures (minimum required: %d)...\n", len(nodeKeys), minSignatures)
+
 		// Publish answer
-		err = client.PublishAnswer(feedID, authorityPubkey, answer, 1)
+		err = client.PublishAnswer(feedID, authorityPubkey, answer, minSignatures)
 		if err != nil {
 			log.Fatalf("Failed to publish answer: %v", err)
 		}

@@ -1,109 +1,142 @@
-# Molpha Oracle Go Client
+# Oracle Client
 
-This is a Go client for the Molpha Oracle protocol on Solana. It can sign messages with Ed25519 signatures and publish oracle data to feeds.
+A Go client for interacting with the Molpha Solana Oracle program, supporting both single and multi-signature oracle data publishing.
 
 ## Features
 
-- Generate Ed25519 keypairs for oracle nodes
-- Sign messages with Ed25519 signatures
-- Create Ed25519 verification instructions for Solana
-- Publish oracle answers to feeds via the `verify_signatures` instruction
-
-## Prerequisites
-
-- Go 1.21 or later
-- A running Solana validator (local or devnet/mainnet)
-- Deployed Molpha Oracle programs
+- **Multi-signature Support**: Publish oracle data with multiple oracle nodes signing the same message
+- **Flexible Signature Requirements**: Configure minimum signature thresholds (e.g., 2-of-3, 3-of-5)
+- **Backwards Compatibility**: Still supports single-node operation
+- **Ed25519 Signature Verification**: Uses Solana's native Ed25519 program for signature verification
+- **Keypair Generation**: Generate new Ed25519 keypairs for oracle nodes
 
 ## Installation
 
 ```bash
-cd client
-go mod tidy
 go build -o oracle-client main.go
 ```
 
 ## Usage
 
-### Generate a new keypair
+### Generate Keypairs
+
+Generate a new Ed25519 keypair for oracle nodes:
 
 ```bash
 ./oracle-client generate-keypair
 ```
 
-This will output:
-```
-Private Key: <base58-encoded-private-key>
-Public Key: <base58-encoded-public-key>
-```
+### Publish Oracle Data
 
-### Publish oracle data
+#### Single Node Signature (Backwards Compatible)
 
 ```bash
 ./oracle-client publish <feed_id> <value> <node_private_key> <payer_private_key> [feed_authority_key]
 ```
 
-Parameters:
-- `feed_id`: The ID of the feed to publish to
-- `value`: The oracle value (as string or base58-encoded bytes)
-- `node_private_key`: Base58-encoded private key of the oracle node (must be registered in NodeRegistry)
-- `payer_private_key`: Base58-encoded private key of the transaction payer
-- `feed_authority_key`: (Optional) Base58-encoded private key or public key of the feed authority. Defaults to payer key.
-
 Example:
 ```bash
-./oracle-client publish "BTC-USD" "50000" "your-node-private-key" "your-payer-private-key"
+./oracle-client publish "ETH-PRICE" "3500" "4jK8...node_key" "3hF2...payer_key"
 ```
 
-## How it works
+#### Multiple Node Signatures
 
-1. **Message Creation**: The client creates a JSON message containing the feed ID, value, and timestamp
-2. **Signing**: The message is signed using Ed25519 with the node's private key
-3. **Ed25519 Instruction**: An Ed25519 signature verification instruction is created with the proper format
-4. **Verify Signatures Instruction**: A call to the `verify_signatures` instruction is created with all required accounts
-5. **Transaction**: Both instructions are combined into a single transaction and sent to Solana
+For enhanced security, use multiple oracle nodes to sign the same data:
 
-## Message Format
-
-The client signs messages in this JSON format:
-```json
-{
-  "feed_id": "BTC-USD",
-  "value": "base58-encoded-value",
-  "timestamp": 1234567890
-}
+```bash
+./oracle-client publish <feed_id> <value> <node_key1,node_key2,node_key3> <payer_private_key> [feed_authority_key]
 ```
 
-## Program Integration
-
-The client works with these Solana programs:
-- **Node Registry Program**: Manages oracle nodes and verifies signatures
-- **Feed Program**: Manages oracle feeds and stores answers
-
-Make sure to update the program IDs in `main.go` to match your deployed programs:
-```go
-var (
-    NodeRegistryProgramID = solana.MustPublicKeyFromBase58("your-node-registry-program-id")
-    FeedProgramID         = solana.MustPublicKeyFromBase58("your-feed-program-id")
-)
+Example with 3 nodes:
+```bash
+./oracle-client publish "ETH-PRICE" "3500" "4jK8...node1,5mL9...node2,6nM0...node3" "3hF2...payer_key"
 ```
 
-## Configuration
+#### Flexible Signature Requirements
 
-The client currently connects to `http://127.0.0.1:8899` (local Solana validator). To use a different RPC endpoint, modify the `NewOracleClient` call in the `publish` command section.
+By default, all provided nodes must sign. You can override this using the `MIN_SIGNATURES` environment variable:
+
+```bash
+# Require only 2 signatures out of 3 nodes
+export MIN_SIGNATURES=2
+./oracle-client publish "ETH-PRICE" "3500" "node1,node2,node3" "payer_key"
+```
+
+## How Multi-Signature Works
+
+1. **Message Creation**: The client creates a JSON message containing feed_id, value, and timestamp
+2. **Multiple Signatures**: Each oracle node signs the same message with their private key
+3. **Ed25519 Instructions**: Multiple Ed25519 verification instructions are created, one per node
+4. **Transaction Assembly**: All Ed25519 instructions are included before the `verify_signatures` instruction
+5. **On-Chain Verification**: The Rust program iterates through Ed25519 instructions, validates signatures, and ensures the minimum threshold is met
+
+## Examples
+
+Run the comprehensive demo script:
+
+```bash
+./example-multisig.sh
+```
+
+This script demonstrates:
+- Single node signature (backwards compatibility)
+- Two node signatures
+- Three node signatures  
+- Flexible signature requirements (2-of-3)
+
+## Security Benefits
+
+Multi-signature oracle data provides several security advantages:
+
+1. **Decentralization**: No single point of failure
+2. **Collusion Resistance**: Requires multiple nodes to coordinate malicious behavior
+3. **Data Integrity**: Multiple independent sources validate the same data
+4. **Threshold Security**: Configurable N-of-M signature schemes
+
+## Integration with Solana Programs
+
+The client works with the Molpha Oracle infrastructure:
+
+- **Node Registry Program**: Manages registered oracle nodes
+- **Feed Program**: Handles oracle data publishing and consumption
+- **Ed25519 Program**: Native Solana program for signature verification
 
 ## Error Handling
 
-The client includes comprehensive error handling for:
-- Invalid private keys
-- Network connection issues
-- Transaction failures
-- Signature verification failures
-- Account not found errors
+Common error scenarios:
 
-## Security Notes
+- **Insufficient Nodes**: Client validates you have enough nodes for the minimum signature requirement
+- **Invalid Keys**: Proper validation of private key formats
+- **Network Issues**: Retry logic for transaction confirmation
+- **Signature Verification**: On-chain validation ensures all signatures are valid
 
-- Keep your private keys secure and never commit them to version control
-- The node private key must be registered in the NodeRegistry before it can publish data
-- Ensure the payer account has sufficient SOL for transaction fees
-- For personal feeds, ensure the subscription account has sufficient balance 
+## Development
+
+### Building
+
+```bash
+go build -o oracle-client main.go
+```
+
+### Testing
+
+```bash
+# Test with local validator
+./oracle-client publish "test-feed" "12345" "node1,node2" "payer_key"
+```
+
+## Environment Variables
+
+- `MIN_SIGNATURES`: Override the default requirement of all nodes signing (useful for testing)
+
+## Command Line Reference
+
+```
+Usage:
+  generate-keypair                                                    - Generate a new keypair
+  publish <feed_id> <value> <node_key1[,node_key2,...]> <payer_key> [authority_key] - Publish oracle data with multiple signatures
+
+Examples:
+  Single node:    publish feed1 hello node_key payer_key
+  Multiple nodes: publish feed1 hello node_key1,node_key2,node_key3 payer_key
+``` 
