@@ -558,18 +558,18 @@ describe("molpha", () => {
     }
 
     it("Successfully creates a data source with valid EIP-712 signature", async () => {
-      // Show what the test data looks like
-      const dataSourceData = {
-        ownerEth: Array.from(Buffer.from(testDataSource.owner.slice(2), 'hex')),
-        dataSourceType: testDataSource.dataSourceType === 1 ? { private: {} } : { public: {} },
-        name: testDataSource.name,
-        source: testDataSource.source,
+      // Show what the test data looks like - using DataSourceInit structure
+      const dataSourceInit = {
+        dataSourceType: testDataSource.dataSourceType === 1 ? { private: {} } : { public: {} },  // First field
+        source: testDataSource.source,                                                            // Second field
+        ownerEth: Array.from(Buffer.from(testDataSource.owner.slice(2), 'hex')),                 // Third field
+        name: testDataSource.name,                                                                // Fourth field
       };
 
-      console.log("dataSourceData.ownerEth", dataSourceData.ownerEth);
-      console.log("dataSourceData.dataSourceType", dataSourceData.dataSourceType);
-      console.log("dataSourceData.name", dataSourceData.name);
-      console.log("dataSourceData.source", dataSourceData.source);
+      console.log("dataSourceInit.ownerEth", dataSourceInit.ownerEth);
+      console.log("dataSourceInit.dataSourceType", dataSourceInit.dataSourceType);
+      console.log("dataSourceInit.name", dataSourceInit.name);
+      console.log("dataSourceInit.source", dataSourceInit.source);
 
       // Compute EIP-712 digest - MUST match what the program computes
       const domainSeparator = buildEIP712Domain("Molpha Oracles", "1"); // Match program's domain
@@ -600,15 +600,16 @@ describe("molpha", () => {
 
       console.log("Data source PDA:", dataSourcePDA.toString());
 
-      // Extract signature components for syscall approach
+      // Send transaction using syscall approach (no secp256k1 instruction needed)
+      // Extract recovery ID and convert from Ethereum format (27/28) to Solana format (0/1)
       const recoveryId = parseInt(testSignature.slice(-2), 16) - 27;
-      const sig = Array.from(Buffer.from(testSignature.slice(2, -2), 'hex')); // Remove 0x and recovery ID
-
-
-      // Send transaction with syscall approach (no secp256k1 instruction needed)
+      const sigWithoutRecoveryId = Buffer.from(testSignature.slice(2, -2), 'hex'); // r,s without recovery ID
+      const sigWithSolanaRecoveryId = Buffer.concat([sigWithoutRecoveryId, Buffer.from([recoveryId])]);
+      const sig = Array.from(sigWithSolanaRecoveryId);
+      
       try {
         await molphaProgram.methods
-          .createDataSource(dataSourceData, sig, recoveryId)
+          .createDataSource(dataSourceInit, sig, 0) // secp_ix_index not used in syscall approach
           .accounts({
             payer: authority.publicKey,
             dataSourcePda: dataSourcePDA,
@@ -632,11 +633,11 @@ describe("molpha", () => {
     });
 
     it("Fails to create data source with invalid signature", async () => {
-      const dataSourceData = {
-        ownerEth: Array.from(Buffer.from(testDataSource.owner.slice(2), 'hex')),
+      const dataSourceInit = {
         dataSourceType: { private: {} },
-        name: "Invalid Test Data Source",
         source: "https://example.com",
+        ownerEth: Array.from(Buffer.from(testDataSource.owner.slice(2), 'hex')),
+        name: "Invalid Test Data Source",
       };
 
       // Use different data for digest (should cause signature verification to fail)
@@ -661,31 +662,28 @@ describe("molpha", () => {
         molphaProgram.programId
       );
 
-      const transaction = new Transaction();
-      const secp256k1Ix = await createSecp256k1Instruction(digest, testSignature, 0);
-      transaction.add(secp256k1Ix);
-
-      const sig = Array.from(Buffer.from(testSignature.slice(2), 'hex'));
-      const createDataSourceIx = await molphaProgram.methods
-        .createDataSource(dataSourceData, sig, 0)
-        .accounts({
-          payer: authority.publicKey,
-          dataSourcePda: dataSourcePDA,
-          systemProgram: SystemProgram.programId,
-          instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
-        })
-        .instruction();
-
-      transaction.add(createDataSourceIx);
-
+      // Extract recovery ID and convert from Ethereum format (27/28) to Solana format (0/1)
+      const recoveryId = parseInt(testSignature.slice(-2), 16) - 27;
+      const sigWithoutRecoveryId = Buffer.from(testSignature.slice(2, -2), 'hex'); // r,s without recovery ID
+      const sigWithSolanaRecoveryId = Buffer.concat([sigWithoutRecoveryId, Buffer.from([recoveryId])]);
+      const sig = Array.from(sigWithSolanaRecoveryId);
+      
       try {
-        await sendAndConfirmTransaction(provider.connection, transaction, [authority.payer]);
+        await molphaProgram.methods
+          .createDataSource(dataSourceInit, sig, 0)
+          .accounts({
+            payer: authority.publicKey,
+            dataSourcePda: dataSourcePDA,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
         assert.fail("Should have failed with digest mismatch");
       } catch (error: any) {
         console.log("Expected error:", error.message);
         assert.ok(
           error.message.includes("DigestMismatch") || 
           error.message.includes("InvalidEthereumAddress") ||
+          error.message.includes("RecoveredAddressMismatch") ||
           error.message.includes("custom program error")
         );
       }
@@ -693,12 +691,11 @@ describe("molpha", () => {
 
     it("Fails to create data source with wrong owner address", async () => {
       const wrongOwner = "0x1234567890123456789012345678901234567890";
-      const dataSourceData = {
-        ownerEth: Array.from(Buffer.from(wrongOwner.slice(2), 'hex')),
+      const dataSourceInit = {
         dataSourceType: { private: {} },
-        name: "Wrong Owner Test",
-        description: "This should fail due to wrong owner",
         source: "https://example.com",
+        ownerEth: Array.from(Buffer.from(wrongOwner.slice(2), 'hex')),
+        name: "Wrong Owner Test",
       };
 
       // Create correct digest but with wrong owner in data
@@ -723,30 +720,27 @@ describe("molpha", () => {
         molphaProgram.programId
       );
 
-      const transaction = new Transaction();
-      const secp256k1Ix = await createSecp256k1Instruction(digest, testSignature, 0);
-      transaction.add(secp256k1Ix);
-
-      const sig = Array.from(Buffer.from(testSignature.slice(2), 'hex'));
-      const createDataSourceIx = await molphaProgram.methods
-        .createDataSource(dataSourceData, sig, 0)
-        .accounts({
-          payer: authority.publicKey,
-          dataSourcePda: dataSourcePDA,
-          systemProgram: SystemProgram.programId,
-          instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
-        })
-        .instruction();
-
-      transaction.add(createDataSourceIx);
-
+      // Extract recovery ID and convert from Ethereum format (27/28) to Solana format (0/1)
+      const recoveryId = parseInt(testSignature.slice(-2), 16) - 27;
+      const sigWithoutRecoveryId = Buffer.from(testSignature.slice(2, -2), 'hex'); // r,s without recovery ID
+      const sigWithSolanaRecoveryId = Buffer.concat([sigWithoutRecoveryId, Buffer.from([recoveryId])]);
+      const sig = Array.from(sigWithSolanaRecoveryId);
+      
       try {
-        await sendAndConfirmTransaction(provider.connection, transaction, [authority.payer]);
+        await molphaProgram.methods
+          .createDataSource(dataSourceInit, sig, 0)
+          .accounts({
+            payer: authority.publicKey,
+            dataSourcePda: dataSourcePDA,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
         assert.fail("Should have failed with invalid Ethereum address");
       } catch (error: any) {
         console.log("Expected error:", error.message);
         assert.ok(
           error.message.includes("InvalidEthereumAddress") ||
+          error.message.includes("RecoveredAddressMismatch") ||
           error.message.includes("custom program error")
         );
       }
@@ -754,11 +748,11 @@ describe("molpha", () => {
 
     it("Fails to create duplicate data source", async () => {
       // Try to create the same data source again (should fail)
-      const dataSourceData = {
-        ownerEth: Array.from(Buffer.from(testDataSource.owner.slice(2), 'hex')),
+      const dataSourceInit = {
         dataSourceType: testDataSource.dataSourceType === 1 ? { private: {} } : { public: {} },
-        name: testDataSource.name,
         source: testDataSource.source,
+        ownerEth: Array.from(Buffer.from(testDataSource.owner.slice(2), 'hex')),
+        name: testDataSource.name,
       };
 
       const domainSeparator = buildEIP712Domain("MolphaDataSource", "1");
@@ -786,14 +780,18 @@ describe("molpha", () => {
       const secp256k1Ix = await createSecp256k1Instruction(digest, testSignature, 1); // Use working recovery ID
       transaction.add(secp256k1Ix);
 
-      const sig = Array.from(Buffer.from(testSignature.slice(2), 'hex'));
+      // Extract recovery ID and convert from Ethereum format (27/28) to Solana format (0/1)
+      const recoveryId = parseInt(testSignature.slice(-2), 16) - 27;
+      const sigWithoutRecoveryId = Buffer.from(testSignature.slice(2, -2), 'hex'); // r,s without recovery ID
+      const sigWithSolanaRecoveryId = Buffer.concat([sigWithoutRecoveryId, Buffer.from([recoveryId])]);
+      const sig = Array.from(sigWithSolanaRecoveryId);
       const createDataSourceIx = await molphaProgram.methods
-        .createDataSource(dataSourceData, sig, 0)
+        .createDataSource(dataSourceInit, sig, 0)
         .accounts({
           payer: authority.publicKey,
           dataSourcePda: dataSourcePDA,
           systemProgram: SystemProgram.programId,
-          instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+          instructionsSysvar: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
         })
         .instruction();
 

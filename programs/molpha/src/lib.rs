@@ -71,10 +71,10 @@ pub mod molpha {
     // Data source management functions
     pub fn create_data_source(
         ctx: Context<CreateDataSource>,
-        data: state::DataSourceData,
-        sig: [u8; 64],
-        recovery_id: u8,
+        data: state::DataSourceInit,
+        sig: [u8; 65],
+        secp_ix_index: u8,
     ) -> Result<()> {
-        instructions::create_data_source::create_data_source(ctx, data, sig, recovery_id)
+        instructions::create_data_source::create_data_source(ctx, data, sig, secp_ix_index)
     }
 }

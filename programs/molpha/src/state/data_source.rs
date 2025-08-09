@@ -38,6 +38,24 @@ impl DataSourceType {
     }
 }
 
+/// DataSourceInit - matches EIP-712 structure exactly
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct DataSourceInit {
+    pub data_source_type: DataSourceType,  // type field (first in EIP-712)
+    pub source: String,                    // source field (second in EIP-712)
+    pub owner_eth: [u8; 20],              // owner field (third in EIP-712)
+    pub name: String,                     // name field (fourth in EIP-712)
+}
+
+impl DataSourceInit {
+    pub fn to_seed(&self) -> [u8; 32] {
+        eip712::compute_data_source_id(self).unwrap()
+    }
+    pub fn get_id(&self) -> [u8; 32] {
+        eip712::compute_data_source_id(self).unwrap()
+    }
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct DataSourceData {
     pub owner_eth: [u8; 20],
@@ -48,10 +66,10 @@ pub struct DataSourceData {
 
 impl DataSourceData {
     pub fn to_seed(&self) -> [u8; 32] {
-        eip712::compute_data_source_id(self).unwrap()
+        eip712::compute_data_source_id_legacy(self).unwrap()
     }
     pub fn get_id(&self) -> [u8; 32] {
-        eip712::compute_data_source_id(self).unwrap()
+        eip712::compute_data_source_id_legacy(self).unwrap()
     }
 }
 

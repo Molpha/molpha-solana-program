@@ -4,6 +4,46 @@ use anchor_lang::solana_program::{
     sysvar::instructions::load_instruction_at_checked,
 };
 
+/// Main function to verify Ethereum signature via secp256k1 instruction
+pub fn verify_eth_signature(
+    instructions_sysvar: &AccountInfo,
+    secp_ix_index: u8,
+    digest: &[u8; 32],
+    sig: &[u8; 65], // Full signature with recovery ID
+) -> Result<[u8; 20]> {
+    // Load the secp256k1 instruction
+    let secp_instruction = load_instruction_at_checked(secp_ix_index as usize, instructions_sysvar)
+        .map_err(|_| error!(crate::error::DataSourceError::InvalidSecp256k1Instruction))?;
+
+    // Verify it's a secp256k1 program instruction
+    if secp_instruction.program_id != secp256k1_program::id() {
+        return Err(error!(
+            crate::error::DataSourceError::InvalidSecp256k1Instruction
+        ));
+    }
+
+    // Parse the secp256k1 instruction data
+    let secp_data = parse_secp256k1_instruction_data(&secp_instruction)?;
+
+    // Verify the digest matches what we expect
+    if secp_data.message_hash != *digest {
+        return Err(error!(crate::error::DataSourceError::DigestMismatch));
+    }
+
+    // Verify the signature matches what was provided
+    let provided_sig = &sig[..64]; // r,s components
+    let provided_recovery_id = sig[64];
+    
+    if secp_data.signature != provided_sig || secp_data.recovery_id != provided_recovery_id {
+        return Err(error!(crate::error::DataSourceError::InvalidSecp256k1Instruction));
+    }
+
+    // Recover the Ethereum address from the public key
+    let eth_address = recover_eth_address(&secp_data.pubkey)?;
+
+    Ok(eth_address)
+}
+
 /// Parse and verify a secp256k1 instruction from the instructions sysvar
 pub fn verify_secp256k1_instruction(
     instructions_sysvar: &AccountInfo,

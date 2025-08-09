@@ -46,4 +46,6 @@ pub enum DataSourceError {
     DataSourceAlreadyExists,
     #[msg("Invalid data source data format.")]
     InvalidDataSourceData,
+    #[msg("The recovered address does not match the expected address.")]
+    RecoveredAddressMismatch,
 }
