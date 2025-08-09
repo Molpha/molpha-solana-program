@@ -12,4 +12,4 @@ pub struct SubscriptionAccount {
 impl SubscriptionAccount {
     pub const SEED_PREFIX: &'static [u8] = b"subscription";
     pub const SPACE: usize = 8 + 32 + 8 + (1 + 32) + 1;
-} 
+}

@@ -17,7 +17,8 @@ pub struct FeedAccount {
 
 impl FeedAccount {
     pub const SEED_PREFIX: &'static [u8] = b"feed";
-    pub const SPACE: usize = 8 + 32 + 1 + 1 + 8 + (4 + 60) + Answer::SPACE + (4 + (Answer::SPACE * MAX_HISTORY)) + 8;
+    pub const SPACE: usize =
+        8 + 32 + 1 + 1 + 8 + (4 + 60) + Answer::SPACE + (4 + (Answer::SPACE * MAX_HISTORY)) + 8;
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Default)]

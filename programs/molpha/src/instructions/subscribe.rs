@@ -1,10 +1,10 @@
-use anchor_lang::prelude::*;
-use crate::state::{SubscriptionAccount, FeedAccount, FeedType};
 use crate::error::FeedError;
+use crate::state::{FeedAccount, FeedType, SubscriptionAccount};
+use anchor_lang::prelude::*;
 
 pub fn subscribe(ctx: Context<Subscribe>) -> Result<()> {
     let feed_account = &ctx.accounts.feed_account;
-    
+
     let subscription = &mut ctx.accounts.subscription_account;
     subscription.owner = ctx.accounts.payer.key();
     subscription.balance = 0;
@@ -13,9 +13,12 @@ pub fn subscribe(ctx: Context<Subscribe>) -> Result<()> {
     match feed_account.feed_type {
         FeedType::Public => {
             subscription.parent_subscription = None;
-        },
+        }
         FeedType::Personal => {
-            require!(ctx.accounts.consumer.key() == feed_account.authority, FeedError::NotFeedOwner);
+            require!(
+                ctx.accounts.consumer.key() == feed_account.authority,
+                FeedError::NotFeedOwner
+            );
             subscription.parent_subscription = None;
         }
     }
@@ -43,4 +46,4 @@ pub struct Subscribe<'info> {
     pub payer: Signer<'info>,
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
-} 
+}

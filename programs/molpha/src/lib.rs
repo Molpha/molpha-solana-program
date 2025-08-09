@@ -45,7 +45,10 @@ pub mod molpha {
         instructions::create_feed::create_feed(ctx, params)
     }
 
-    pub fn update_feed_config(ctx: Context<UpdateFeedConfig>, params: UpdateFeedConfigParams) -> Result<()> {
+    pub fn update_feed_config(
+        ctx: Context<UpdateFeedConfig>,
+        params: UpdateFeedConfigParams,
+    ) -> Result<()> {
         instructions::update_feed_config::update_feed_config(ctx, params)
     }
 
@@ -63,5 +66,15 @@ pub mod molpha {
 
     pub fn top_up(ctx: Context<TopUp>, amount: u64) -> Result<()> {
         instructions::top_up::top_up(ctx, amount)
+    }
+
+    // Data source management functions
+    pub fn create_data_source(
+        ctx: Context<CreateDataSource>,
+        data: state::DataSourceData,
+        sig: [u8; 64],
+        recovery_id: u8,
+    ) -> Result<()> {
+        instructions::create_data_source::create_data_source(ctx, data, sig, recovery_id)
     }
 }

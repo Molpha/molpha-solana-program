@@ -1,9 +1,12 @@
-use anchor_lang::prelude::*;
-use crate::state::{FeedAccount, FeedType, MAX_HISTORY};
 use crate::error::FeedError;
+use crate::state::{FeedAccount, FeedType, MAX_HISTORY};
+use anchor_lang::prelude::*;
 
 pub fn create_feed(ctx: Context<CreateFeed>, params: CreateFeedParams) -> Result<()> {
-    require!(params.min_signatures_threshold > 0, FeedError::InvalidFeedConfig);
+    require!(
+        params.min_signatures_threshold > 0,
+        FeedError::InvalidFeedConfig
+    );
     require!(!params.ipfs_cid.is_empty(), FeedError::InvalidFeedConfig);
 
     let feed_account = &mut ctx.accounts.feed_account;
@@ -13,7 +16,7 @@ pub fn create_feed(ctx: Context<CreateFeed>, params: CreateFeedParams) -> Result
     feed_account.frequency = params.frequency;
     feed_account.ipfs_cid = params.ipfs_cid;
     feed_account.answer_history = Vec::with_capacity(MAX_HISTORY);
-    
+
     Ok(())
 }
 

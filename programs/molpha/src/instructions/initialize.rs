@@ -1,5 +1,5 @@
-use anchor_lang::prelude::*;
 use crate::state::NodeRegistry;
+use anchor_lang::prelude::*;
 
 pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
     let node_registry = &mut ctx.accounts.node_registry;

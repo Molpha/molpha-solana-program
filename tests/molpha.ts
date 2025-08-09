@@ -8,8 +8,11 @@ import {
   Transaction,
   sendAndConfirmTransaction,
   PublicKey,
+  SYSVAR_INSTRUCTIONS_PUBKEY,
 } from "@solana/web3.js";
 import nacl from "tweetnacl";
+import { ethers } from "ethers";
+const secp256k1 = require("@noble/secp256k1");
 
 describe("molpha", () => {
   const provider = anchor.AnchorProvider.env();
@@ -436,6 +439,377 @@ describe("molpha", () => {
       const feedAccountData = await molphaProgram.account.feedAccount.fetch(feedAccountPDA);
       assert.deepEqual(feedAccountData.latestAnswer.value, answer.value);
       assert.ok(feedAccountData.latestAnswer.timestamp.eq(answer.timestamp));
+    });
+  });
+
+  describe("Data Source Creation", () => {
+    // Test data from EVM contract tests - exact match
+    const testDataSource = {
+      dataSourceType: 1, // Private
+      source: "https://finnhub.io/api/v1/quote",
+      owner: "0xa408b7c5BC50fa392642C58B9758410ea3376a09", // Original owner from EVM tests
+      name: "Apple Stock Price 2"
+    };
+
+    const testSignature = "0xb8b5718dedd6ba74f754a35ec92064a30443559e7f8b2e5d2b43f3b56147014d4c328a3a482feaebd969bd501975a81676feea6ca313bfebea18fff4f3d1e9e51c";
+
+    // Helper functions for EIP-712 and secp256k1
+    function buildEIP712Domain(name: string, version: string) {
+      // Use hardcoded DOMAIN_SEPARATOR from DataSourceRegistry.sol
+      // bytes32 private constant DOMAIN_SEPARATOR = 0x91af22df910089dce34bc41d0790bb4a1beee77dda588667c082bb964143739f;
+      return Buffer.from([
+        0x91, 0xaf, 0x22, 0xdf, 0x91, 0x00, 0x89, 0xdc, 0xe3, 0x4b, 0xc4, 0x1d, 0x07, 0x90, 0xbb, 0x4a,
+        0x1b, 0xee, 0xe7, 0x7d, 0xda, 0x58, 0x86, 0x67, 0xc0, 0x82, 0xbb, 0x96, 0x41, 0x43, 0x73, 0x9f
+      ]);
+    }
+
+    function buildDataSourceStructHash(data: any) {
+      const typeHash = Buffer.from(
+        ethers.keccak256(Buffer.from("DataSource(uint8 type,string source,address owner,string name)")).slice(2),
+        'hex'
+      );
+      
+      const sourceHash = Buffer.from(ethers.keccak256(Buffer.from(data.source)).slice(2), 'hex');
+      const nameHash = Buffer.from(ethers.keccak256(Buffer.from(data.name)).slice(2), 'hex');
+      
+      // Pad owner address to 32 bytes
+      const ownerEthPadded = Buffer.alloc(32);
+      Buffer.from(data.owner.slice(2), 'hex').copy(ownerEthPadded, 12);
+      
+      // Pad dataSourceType to 32 bytes
+      const dataSourceTypeBytes = Buffer.alloc(32);
+      dataSourceTypeBytes[31] = data.dataSourceType;
+      
+      // Match Solidity parameter order: (type, source, owner, name)
+      return Buffer.from(ethers.keccak256(Buffer.concat([
+        typeHash,
+        dataSourceTypeBytes,
+        sourceHash,
+        ownerEthPadded,
+        nameHash,
+      ])).slice(2), 'hex');
+    }
+
+    function buildEIP712Digest(domainSeparator: Uint8Array, structHash: Uint8Array) {
+      return Buffer.from(ethers.keccak256(Buffer.concat([
+        Buffer.from("\x19\x01"),
+        domainSeparator,
+        structHash,
+      ])).slice(2), 'hex');
+    }
+
+    function computeDataSourceId(data: any) {
+      const serialized = Buffer.concat([
+        Buffer.from([data.dataSourceType]),
+        Buffer.from(data.source || ""),
+        Buffer.from(data.ownerEth.slice(2), 'hex'),
+        Buffer.from(data.name),
+      ]);
+      return Buffer.from(ethers.keccak256(serialized).slice(2), 'hex');
+    }
+
+    async function createSecp256k1Instruction(digest: Uint8Array, signature: string, recoveryId: number) {
+      // Parse signature (remove 0x prefix and recovery ID suffix)
+      const sigBytes = Buffer.from(signature.slice(2, -2), 'hex');
+      const r = sigBytes.slice(0, 32);
+      const s = sigBytes.slice(32, 64);
+      
+      // Recover public key
+      const sig = secp256k1.Signature.fromCompact(sigBytes.slice(0, 64)).addRecoveryBit(recoveryId);
+      const publicKey = sig.recoverPublicKey(digest);
+      const publicKeyBytes = publicKey.toRawBytes(false).slice(1); // Remove 0x04 prefix
+      
+      // Use Solana's secp256k1 instruction format (16-byte header + data)
+      const signatureOffset = 16;
+      const publicKeyOffset = signatureOffset + 65; // 64 bytes signature + 1 byte recovery
+      const messageDataOffset = publicKeyOffset + 64;
+      const messageDataSize = 32;
+      
+      const instructionData = Buffer.alloc(16 + 65 + 64 + 32);
+      let offset = 0;
+      
+      // Header (16 bytes) - matches Ed25519 format but for secp256k1
+      instructionData[offset++] = 1; // num_signatures
+      instructionData[offset++] = 0; // padding
+      instructionData.writeUInt16LE(signatureOffset, offset); offset += 2; // signature_offset
+      instructionData.writeUInt16LE(0, offset); offset += 2; // signature_instruction_index
+      instructionData.writeUInt16LE(publicKeyOffset, offset); offset += 2; // public_key_offset
+      instructionData.writeUInt16LE(0, offset); offset += 2; // public_key_instruction_index
+      instructionData.writeUInt16LE(messageDataOffset, offset); offset += 2; // message_data_offset
+      instructionData.writeUInt16LE(messageDataSize, offset); offset += 2; // message_data_size
+      instructionData.writeUInt16LE(0, offset); offset += 2; // message_instruction_index
+      
+      // Signature data (65 bytes: r + s + recovery_id)
+      r.copy(instructionData, signatureOffset);
+      s.copy(instructionData, signatureOffset + 32);
+      instructionData[signatureOffset + 64] = recoveryId;
+      
+      // Public key (64 bytes)
+      Buffer.from(publicKeyBytes).copy(instructionData, publicKeyOffset);
+      
+      // Message hash (32 bytes)
+      Buffer.from(digest).copy(instructionData, messageDataOffset);
+      
+      return {
+        programId: new PublicKey("KeccakSecp256k11111111111111111111111111111"),
+        keys: [],
+        data: instructionData,
+      };
+    }
+
+    it("Successfully creates a data source with valid EIP-712 signature", async () => {
+      // Show what the test data looks like
+      const dataSourceData = {
+        ownerEth: Array.from(Buffer.from(testDataSource.owner.slice(2), 'hex')),
+        dataSourceType: testDataSource.dataSourceType === 1 ? { private: {} } : { public: {} },
+        name: testDataSource.name,
+        source: testDataSource.source,
+      };
+
+      console.log("dataSourceData.ownerEth", dataSourceData.ownerEth);
+      console.log("dataSourceData.dataSourceType", dataSourceData.dataSourceType);
+      console.log("dataSourceData.name", dataSourceData.name);
+      console.log("dataSourceData.source", dataSourceData.source);
+
+      // Compute EIP-712 digest - MUST match what the program computes
+      const domainSeparator = buildEIP712Domain("Molpha Oracles", "1"); // Match program's domain
+      const structHash = buildDataSourceStructHash({
+        owner: testDataSource.owner, // Use 'owner' instead of 'ownerEth'
+        dataSourceType: testDataSource.dataSourceType,
+        name: testDataSource.name,
+        source: testDataSource.source,
+      });
+      const digest = buildEIP712Digest(domainSeparator, structHash);
+
+      console.log("EIP-712 digest:", Buffer.from(digest).toString('hex'));
+
+      // Compute data source ID 
+      const dataSourceId = computeDataSourceId({
+        dataSourceType: testDataSource.dataSourceType,
+        ownerEth: testDataSource.owner,
+        name: testDataSource.name,
+        source: testDataSource.source,
+      });
+
+      console.log("Data source ID:", Buffer.from(dataSourceId).toString('hex'));
+
+      const [dataSourcePDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("data_source"), dataSourceId],
+        molphaProgram.programId
+      );
+
+      console.log("Data source PDA:", dataSourcePDA.toString());
+
+      // Extract signature components for syscall approach
+      const recoveryId = parseInt(testSignature.slice(-2), 16) - 27;
+      const sig = Array.from(Buffer.from(testSignature.slice(2, -2), 'hex')); // Remove 0x and recovery ID
+
+
+      // Send transaction with syscall approach (no secp256k1 instruction needed)
+      try {
+        await molphaProgram.methods
+          .createDataSource(dataSourceData, sig, recoveryId)
+          .accounts({
+            payer: authority.publicKey,
+            dataSourcePda: dataSourcePDA,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+      } catch (error: any) {
+        console.log("Full error:", error);
+        if (error.logs) {
+          console.log("Transaction logs:", error.logs);
+        }
+        throw error;
+      }
+
+      const dataSourceAccount = await molphaProgram.account.dataSource.fetch(dataSourcePDA);
+      console.log("Created data source:", dataSourceAccount);
+      
+      // Verify the account was created correctly
+      assert.deepEqual(dataSourceAccount.ownerEth, Array.from(Buffer.from(testDataSource.owner.slice(2), 'hex')));
+      assert.equal(dataSourceAccount.isPublic, testDataSource.dataSourceType === 0);
+    });
+
+    it("Fails to create data source with invalid signature", async () => {
+      const dataSourceData = {
+        ownerEth: Array.from(Buffer.from(testDataSource.owner.slice(2), 'hex')),
+        dataSourceType: { private: {} },
+        name: "Invalid Test Data Source",
+        source: "https://example.com",
+      };
+
+      // Use different data for digest (should cause signature verification to fail)
+      const domainSeparator = buildEIP712Domain("MolphaDataSource", "1");
+      const structHash = buildDataSourceStructHash({
+        owner: testDataSource.owner, // Use 'owner' instead of 'ownerEth'
+        dataSourceType: testDataSource.dataSourceType,
+        name: "Different Name", // Different from what we're trying to create
+        source: "https://example.com",
+      });
+      const digest = buildEIP712Digest(domainSeparator, structHash);
+
+      const dataSourceId = computeDataSourceId({
+        ownerEth: testDataSource.owner,
+        dataSourceType: testDataSource.dataSourceType,
+        name: "Invalid Test Data Source",
+        source: "https://example.com",
+      });
+
+      const [dataSourcePDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("data_source"), dataSourceId],
+        molphaProgram.programId
+      );
+
+      const transaction = new Transaction();
+      const secp256k1Ix = await createSecp256k1Instruction(digest, testSignature, 0);
+      transaction.add(secp256k1Ix);
+
+      const sig = Array.from(Buffer.from(testSignature.slice(2), 'hex'));
+      const createDataSourceIx = await molphaProgram.methods
+        .createDataSource(dataSourceData, sig, 0)
+        .accounts({
+          payer: authority.publicKey,
+          dataSourcePda: dataSourcePDA,
+          systemProgram: SystemProgram.programId,
+          instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+        })
+        .instruction();
+
+      transaction.add(createDataSourceIx);
+
+      try {
+        await sendAndConfirmTransaction(provider.connection, transaction, [authority.payer]);
+        assert.fail("Should have failed with digest mismatch");
+      } catch (error: any) {
+        console.log("Expected error:", error.message);
+        assert.ok(
+          error.message.includes("DigestMismatch") || 
+          error.message.includes("InvalidEthereumAddress") ||
+          error.message.includes("custom program error")
+        );
+      }
+    });
+
+    it("Fails to create data source with wrong owner address", async () => {
+      const wrongOwner = "0x1234567890123456789012345678901234567890";
+      const dataSourceData = {
+        ownerEth: Array.from(Buffer.from(wrongOwner.slice(2), 'hex')),
+        dataSourceType: { private: {} },
+        name: "Wrong Owner Test",
+        description: "This should fail due to wrong owner",
+        source: "https://example.com",
+      };
+
+      // Create correct digest but with wrong owner in data
+      const domainSeparator = buildEIP712Domain("MolphaDataSource", "1");
+      const structHash = buildDataSourceStructHash({
+        owner: testDataSource.owner, // Correct owner for signature
+        dataSourceType: testDataSource.dataSourceType,
+        name: "Wrong Owner Test",
+        source: "https://example.com",
+      });
+      const digest = buildEIP712Digest(domainSeparator, structHash);
+
+      const dataSourceId = computeDataSourceId({
+        ownerEth: wrongOwner,
+        dataSourceType: testDataSource.dataSourceType,
+        name: "Wrong Owner Test",
+        source: "https://example.com",
+      });
+
+      const [dataSourcePDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("data_source"), dataSourceId],
+        molphaProgram.programId
+      );
+
+      const transaction = new Transaction();
+      const secp256k1Ix = await createSecp256k1Instruction(digest, testSignature, 0);
+      transaction.add(secp256k1Ix);
+
+      const sig = Array.from(Buffer.from(testSignature.slice(2), 'hex'));
+      const createDataSourceIx = await molphaProgram.methods
+        .createDataSource(dataSourceData, sig, 0)
+        .accounts({
+          payer: authority.publicKey,
+          dataSourcePda: dataSourcePDA,
+          systemProgram: SystemProgram.programId,
+          instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+        })
+        .instruction();
+
+      transaction.add(createDataSourceIx);
+
+      try {
+        await sendAndConfirmTransaction(provider.connection, transaction, [authority.payer]);
+        assert.fail("Should have failed with invalid Ethereum address");
+      } catch (error: any) {
+        console.log("Expected error:", error.message);
+        assert.ok(
+          error.message.includes("InvalidEthereumAddress") ||
+          error.message.includes("custom program error")
+        );
+      }
+    });
+
+    it("Fails to create duplicate data source", async () => {
+      // Try to create the same data source again (should fail)
+      const dataSourceData = {
+        ownerEth: Array.from(Buffer.from(testDataSource.owner.slice(2), 'hex')),
+        dataSourceType: testDataSource.dataSourceType === 1 ? { private: {} } : { public: {} },
+        name: testDataSource.name,
+        source: testDataSource.source,
+      };
+
+      const domainSeparator = buildEIP712Domain("MolphaDataSource", "1");
+      const structHash = buildDataSourceStructHash({
+        owner: testDataSource.owner, // Use 'owner' instead of 'ownerEth'
+        dataSourceType: testDataSource.dataSourceType,
+        name: testDataSource.name,
+        source: testDataSource.source,
+      });
+      const digest = buildEIP712Digest(domainSeparator, structHash);
+
+      const dataSourceId = computeDataSourceId({
+        ownerEth: testDataSource.owner,
+        dataSourceType: testDataSource.dataSourceType,
+        name: testDataSource.name,
+        source: testDataSource.source,
+      });
+
+      const [dataSourcePDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("data_source"), dataSourceId],
+        molphaProgram.programId
+      );
+
+      const transaction = new Transaction();
+      const secp256k1Ix = await createSecp256k1Instruction(digest, testSignature, 1); // Use working recovery ID
+      transaction.add(secp256k1Ix);
+
+      const sig = Array.from(Buffer.from(testSignature.slice(2), 'hex'));
+      const createDataSourceIx = await molphaProgram.methods
+        .createDataSource(dataSourceData, sig, 0)
+        .accounts({
+          payer: authority.publicKey,
+          dataSourcePda: dataSourcePDA,
+          systemProgram: SystemProgram.programId,
+          instructionsSysvar: SYSVAR_INSTRUCTIONS_PUBKEY,
+        })
+        .instruction();
+
+      transaction.add(createDataSourceIx);
+
+      try {
+        await sendAndConfirmTransaction(provider.connection, transaction, [authority.payer]);
+        assert.fail("Should have failed with data source already exists");
+      } catch (error: any) {
+        console.log("Expected error:", error.message);
+        assert.ok(
+          error.message.includes("DataSourceAlreadyExists") || 
+          error.message.includes("already in use") ||
+          error.message.includes("custom program error")
+        );
+      }
     });
   });
 });

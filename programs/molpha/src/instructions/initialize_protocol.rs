@@ -1,5 +1,5 @@
-use anchor_lang::prelude::*;
 use crate::state::ProtocolConfig;
+use anchor_lang::prelude::*;
 
 pub fn initialize_protocol(ctx: Context<InitializeProtocol>, fee: u64) -> Result<()> {
     let config = &mut ctx.accounts.protocol_config;
@@ -22,4 +22,4 @@ pub struct InitializeProtocol<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
-} 
+}

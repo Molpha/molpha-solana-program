@@ -1,6 +1,9 @@
-use anchor_lang::prelude::*;
 use crate::error::NodeRegistryError;
+use anchor_lang::prelude::*;
 use anchor_lang::solana_program;
+
+pub mod eip712;
+pub mod secp;
 
 /// Parses a legacy Ed25519 verification instruction to extract the signer's public key and the message.
 /// The instruction data format is a 16-byte header followed by data payloads.
@@ -14,7 +17,9 @@ use anchor_lang::solana_program;
 /// - 10: u16 message_data_offset
 /// - 12: u16 message_data_size
 /// - 14: u16 message_instruction_index
-pub fn parse_ed25519_instruction(instruction: &solana_program::instruction::Instruction) -> Result<(Pubkey, Vec<u8>)> {
+pub fn parse_ed25519_instruction(
+    instruction: &solana_program::instruction::Instruction,
+) -> Result<(Pubkey, Vec<u8>)> {
     let data = &instruction.data;
     const HEADER_SIZE: usize = 16;
 

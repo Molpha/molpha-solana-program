@@ -1,5 +1,5 @@
-use anchor_lang::prelude::*;
 use crate::state::SubscriptionAccount;
+use anchor_lang::prelude::*;
 
 pub fn top_up(ctx: Context<TopUp>, amount: u64) -> Result<()> {
     let cpi_context = CpiContext::new(
@@ -12,7 +12,7 @@ pub fn top_up(ctx: Context<TopUp>, amount: u64) -> Result<()> {
     anchor_lang::system_program::transfer(cpi_context, amount)?;
 
     ctx.accounts.subscription_account.balance += amount;
-    
+
     Ok(())
 }
 
@@ -26,4 +26,4 @@ pub struct TopUp<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
     pub system_program: Program<'info, System>,
-} 
+}
