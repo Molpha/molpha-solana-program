@@ -1,20 +1,20 @@
 [package]
-name = "molpha-feed"
+name = "molpha"
 version = "0.1.0"
-description = "Created with Anchor"
+description = "Molpha Oracle Solana Program - Merged from molpha-solana and molpha-feed"
 edition = "2021"
 
 [lib]
 crate-type = ["cdylib", "lib"]
-name = "molpha_feed"
+name = "molpha"
 
 [features]
+default = []
+cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
-cpi = ["no-entrypoint"]
-default = []
 idl-build = ["anchor-lang/idl-build"]
 
 [dependencies]
-anchor-lang = "0.31.1" 
+anchor-lang = "0.31.1"

@@ -1,18 +1,15 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{ed25519_program, sysvar};
-use crate::state::NodeRegistry;
+use crate::state::{NodeRegistry, Answer, FeedAccount, FeedType, ProtocolConfig, SubscriptionAccount};
 use crate::error::NodeRegistryError;
 use crate::utils::parse_ed25519_instruction;
-use molpha_feed::cpi::accounts::PublishAnswer;
-use molpha_feed::program::MolphaFeed;
-use molpha_feed::{self, state as feed_state};
 
 
 pub fn verify_signatures(
     ctx: Context<VerifySignatures>,
     message: Vec<u8>,
     min_signatures_threshold: u8,
-    answer: feed_state::Answer
+    answer: Answer
 ) -> Result<()> {
     let instructions_sysvar = &ctx.accounts.instructions;
     let current_instruction_index =
@@ -41,18 +38,34 @@ pub fn verify_signatures(
         NodeRegistryError::NotEnoughSignatures
     );
 
-    // CPI to the feed program
-    let cpi_program = ctx.accounts.feed_program.to_account_info();
-    let cpi_accounts = PublishAnswer {
-        feed_account: ctx.accounts.feed_account.to_account_info(),
-        node_registry: ctx.accounts.node_registry.to_account_info(),
-        protocol_config: ctx.accounts.protocol_config.to_account_info(),
-        subscription_account: Some(ctx.accounts.subscription_account.to_account_info()),
-    };
-    let seeds = &[&NodeRegistry::SEED_PREFIX[..], &[ctx.bumps.node_registry]];
-    let signer = &[&seeds[..]];
-    let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
-    molpha_feed::cpi::publish_answer(cpi_ctx, answer)?;
+    // Direct call to publish answer logic (now in the same program)
+    let feed_account = &mut ctx.accounts.feed_account;
+    let clock = Clock::get()?;
+
+    require!(answer.timestamp > feed_account.latest_answer.timestamp, crate::error::FeedError::PastTimestamp);
+    require!(answer.timestamp <= clock.unix_timestamp, crate::error::FeedError::FutureTimestamp);
+    
+    // Hybrid Logic: Charge a fee only for Personal Feeds
+    if feed_account.feed_type == FeedType::Personal {
+        let subscription_account = &mut ctx.accounts.subscription_account;
+        let config = &ctx.accounts.protocol_config;
+
+        // Check balance and deduct fee
+        require!(subscription_account.balance >= config.fee_per_update, crate::error::FeedError::InsufficientBalance);
+        subscription_account.balance -= config.fee_per_update;
+    }
+
+    feed_account.latest_answer = answer;
+
+    // Use a ring buffer for history
+    if feed_account.answer_history.len() < 100 { // Replace with MAX_HISTORY
+        feed_account.answer_history.push(answer);
+        feed_account.history_idx = feed_account.answer_history.len() as u64;
+    } else {
+        let history_idx = feed_account.history_idx as usize;
+        feed_account.answer_history[history_idx] = answer;
+        feed_account.history_idx = (history_idx as u64 + 1) % 100; // Replace with MAX_HISTORY
+    }
 
 
     msg!(
@@ -70,15 +83,11 @@ pub struct VerifySignatures<'info> {
         bump
     )]
     pub node_registry: Account<'info, NodeRegistry>,
-    /// CHECK: This is the account that the answer will be published to.
     #[account(mut)]
-    pub feed_account: UncheckedAccount<'info>,
-    pub feed_program: Program<'info, MolphaFeed>,
-    /// CHECK: This is safe. The subscription account is only required for personal feeds.
+    pub feed_account: Account<'info, FeedAccount>,
     #[account(mut)]
-    pub subscription_account: UncheckedAccount<'info>,
-    /// CHECK: This is safe. The protocol config account is required for all feeds.
-    pub protocol_config: UncheckedAccount<'info>,
+    pub subscription_account: Account<'info, SubscriptionAccount>,
+    pub protocol_config: Account<'info, ProtocolConfig>,
     /// CHECK: This is the Instructions sysvar, which is safe to use.
     #[account(address = sysvar::instructions::ID)]
     pub instructions: UncheckedAccount<'info>,

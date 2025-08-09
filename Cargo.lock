@@ -756,18 +756,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "molpha-feed"
+name = "molpha"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
-]
-
-[[package]]
-name = "molpha-solana"
-version = "0.1.0"
-dependencies = [
- "anchor-lang",
- "molpha-feed",
 ]
 
 [[package]]
