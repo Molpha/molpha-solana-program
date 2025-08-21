@@ -32,6 +32,10 @@ pub enum FeedError {
     ZeroValue,
     #[msg("Insufficient balance for this operation.")]
     InsufficientBalance,
+    #[msg("Not enough valid signatures from registered nodes.")]
+    NotEnoughSignatures,
+    #[msg("Invalid or inaccessible data source.")]
+    InvalidDataSource,
 }
 
 #[error_code]
@@ -48,4 +52,10 @@ pub enum DataSourceError {
     InvalidDataSourceData,
     #[msg("The recovered address does not match the expected address.")]
     RecoveredAddressMismatch,
+    #[msg("The recovered address does not match the owner address for permit.")]
+    PermitRecoveredAddressMismatch,
+    #[msg("EthLink already exists.")]
+    EthLinkAlreadyExists,
+    #[msg("EthLink not found.")]
+    EthLinkNotFound,
 }

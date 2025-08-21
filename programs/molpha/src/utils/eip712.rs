@@ -26,7 +26,7 @@ pub fn build_domain_separator(_name: &str, _version: &str) -> [u8; 32] {
 }
 
 /// Build the struct hash for DataSourceInit - match Solidity contract exactly
-pub fn build_struct_hash(data: &crate::state::DataSourceInit) -> [u8; 32] {
+pub fn build_struct_hash(data: &crate::state::DataSourceInfo) -> [u8; 32] {
     let type_hash = get_data_source_type_hash();
     let source_hash = keccak::hash(data.source.as_bytes()).to_bytes();
     let name_hash = keccak::hash(data.name.as_bytes()).to_bytes();
@@ -64,14 +64,14 @@ pub fn build_digest(domain_separator: &[u8; 32], struct_hash: &[u8; 32]) -> [u8;
 }
 
 /// Main function to compute EIP-712 digest for DataSourceInit
-pub fn digest_data_source(data: &crate::state::DataSourceInit) -> Result<[u8; 32]> {
+pub fn digest_data_source(data: &crate::state::DataSourceInfo) -> Result<[u8; 32]> {
     let domain_separator = build_domain_separator("Molpha Oracles", "1");
     let struct_hash = build_struct_hash(data);
     Ok(build_digest(&domain_separator, &struct_hash))
 }
 
 /// Compute the data source ID from the encoded data
-pub fn compute_data_source_id(data: &crate::state::DataSourceInit) -> Result<[u8; 32]> {
+pub fn compute_data_source_id(data: &crate::state::DataSourceInfo) -> Result<[u8; 32]> {
     // Serialize the data deterministically
     let mut serialized = Vec::new();
     serialized.push(match data.data_source_type {
@@ -85,17 +85,36 @@ pub fn compute_data_source_id(data: &crate::state::DataSourceInit) -> Result<[u8
     Ok(keccak::hash(&serialized).to_bytes())
 }
 
-/// Compatibility function for old DataSourceData struct
-pub fn compute_data_source_id_legacy(data: &crate::state::DataSourceData) -> Result<[u8; 32]> {
-    // Serialize the data deterministically
-    let mut serialized = Vec::new();
-    serialized.push(match data.data_source_type {
-        crate::state::DataSourceType::Public => 0u8,
-        crate::state::DataSourceType::Private => 1u8,
-    });
-    serialized.extend_from_slice(data.source.as_bytes());
-    serialized.extend_from_slice(&data.owner_eth);
-    serialized.extend_from_slice(data.name.as_bytes());
+/// Get the PermitGrantee struct type hash for EIP-712
+pub fn get_permit_grantee_type_hash() -> [u8; 32] {
+    keccak::hashv(&[b"PermitGrantee(address ownerEth,bytes32 grantee)"]).to_bytes()
+}
 
-    Ok(keccak::hash(&serialized).to_bytes())
+/// Build the struct hash for PermitGrantee - match Solidity contract exactly
+pub fn build_permit_grantee_struct_hash(owner_eth: &[u8; 20], grantee: &[u8; 32]) -> [u8; 32] {
+    let type_hash = get_permit_grantee_type_hash();
+    
+    // Pad owner_eth to 32 bytes (left-padded with zeros for address type)
+    let mut owner_eth_padded = [0u8; 32];
+    owner_eth_padded[12..32].copy_from_slice(owner_eth);
+
+    // Match Solidity parameter order: (ownerEth, grantee)
+    keccak::hashv(&[
+        &type_hash,
+        &owner_eth_padded,
+        grantee,
+    ])
+    .to_bytes()
+}
+
+/// Main function to compute EIP-712 digest for PermitGrantee
+pub fn digest_permit_grantee(owner_eth: &[u8; 20], grantee: &[u8; 32]) -> Result<[u8; 32]> {
+    let domain_separator = build_domain_separator("Molpha Oracles", "1");
+    let struct_hash = build_permit_grantee_struct_hash(owner_eth, grantee);
+    Ok(build_digest(&domain_separator, &struct_hash))
+}
+
+/// Alias for digest_permit_grantee for backward compatibility
+pub fn digest_link_solana_grantee(owner_eth: &[u8; 20], grantee: &[u8; 32]) -> Result<[u8; 32]> {
+    digest_permit_grantee(owner_eth, grantee)
 }

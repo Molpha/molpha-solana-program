@@ -1,6 +1,6 @@
-use crate::error::NodeRegistryError;
+use crate::error::FeedError;
 use crate::state::{
-    Answer, FeedAccount, FeedType, NodeRegistry, ProtocolConfig, SubscriptionAccount,
+    Answer, FeedAccount, FeedType, NodeRegistry, ProtocolConfig, SubscriptionAccount, MAX_HISTORY,
 };
 use crate::utils::parse_ed25519_instruction;
 use anchor_lang::prelude::*;
@@ -12,6 +12,15 @@ pub fn verify_signatures(
     min_signatures_threshold: u8,
     answer: Answer,
 ) -> Result<()> {
+    let feed_account = &mut ctx.accounts.feed_account;
+    
+    // Override the feed's min_signatures_threshold if provided
+    let required_signatures = if min_signatures_threshold > 0 {
+        min_signatures_threshold
+    } else {
+        feed_account.min_signatures_threshold
+    };
+
     let instructions_sysvar = &ctx.accounts.instructions;
     let current_instruction_index =
         sysvar::instructions::load_current_index_checked(instructions_sysvar)?;
@@ -35,21 +44,20 @@ pub fn verify_signatures(
     }
 
     require!(
-        unique_valid_signers.len() >= min_signatures_threshold as usize,
-        NodeRegistryError::NotEnoughSignatures
+        unique_valid_signers.len() >= required_signatures as usize,
+        FeedError::NotEnoughSignatures
     );
 
     // Direct call to publish answer logic (now in the same program)
-    let feed_account = &mut ctx.accounts.feed_account;
     let clock = Clock::get()?;
 
     require!(
         answer.timestamp > feed_account.latest_answer.timestamp,
-        crate::error::FeedError::PastTimestamp
+        FeedError::PastTimestamp
     );
     require!(
         answer.timestamp <= clock.unix_timestamp,
-        crate::error::FeedError::FutureTimestamp
+        FeedError::FutureTimestamp
     );
 
     // Hybrid Logic: Charge a fee only for Personal Feeds
@@ -60,7 +68,7 @@ pub fn verify_signatures(
         // Check balance and deduct fee
         require!(
             subscription_account.balance >= config.fee_per_update,
-            crate::error::FeedError::InsufficientBalance
+            FeedError::InsufficientBalance
         );
         subscription_account.balance -= config.fee_per_update;
     }
@@ -68,14 +76,13 @@ pub fn verify_signatures(
     feed_account.latest_answer = answer;
 
     // Use a ring buffer for history
-    if feed_account.answer_history.len() < 100 {
-        // Replace with MAX_HISTORY
+    if feed_account.answer_history.len() < MAX_HISTORY {
         feed_account.answer_history.push(answer);
         feed_account.history_idx = feed_account.answer_history.len() as u64;
     } else {
         let history_idx = feed_account.history_idx as usize;
         feed_account.answer_history[history_idx] = answer;
-        feed_account.history_idx = (history_idx as u64 + 1) % 100; // Replace with MAX_HISTORY
+        feed_account.history_idx = (history_idx as u64 + 1) % MAX_HISTORY as u64;
     }
 
     msg!(
@@ -88,13 +95,12 @@ pub fn verify_signatures(
 
 #[derive(Accounts)]
 pub struct VerifySignatures<'info> {
-    #[account(
-        seeds = [NodeRegistry::SEED_PREFIX],
-        bump
-    )]
-    pub node_registry: Account<'info, NodeRegistry>,
     #[account(mut)]
     pub feed_account: Account<'info, FeedAccount>,
+    
+    /// CHECK: This is safe. We only read the nodes list for validation.
+    pub node_registry: Account<'info, NodeRegistry>,
+    
     #[account(mut)]
     pub subscription_account: Account<'info, SubscriptionAccount>,
     pub protocol_config: Account<'info, ProtocolConfig>,

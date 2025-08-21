@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-molpha = "GRguUVXULUZzYdhWBSmWVhkKNnL3zRAXagiK3XfTnAbu"
+molpha = "7MgLh8MFfPrs4Jmx9z3hTq7oapXavoZQ2UXJmy3vdozx"
 
 [registry]
 url = "https://api.apr.dev"

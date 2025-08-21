@@ -3,11 +3,23 @@
   "scripts": {
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
-    "test": "anchor test"
+    "test": "anchor test",
+    "test:node-registry": "anchor test --skip-deploy tests/instructions/node-registry.test.ts",
+    "test:create-data-source": "anchor test --skip-deploy tests/instructions/create-data-source.test.ts",
+    "test:create-feed": "anchor test --skip-deploy tests/instructions/create-feed.test.ts",
+    "test:permit": "anchor test --skip-deploy tests/instructions/permit.test.ts",
+    "test:feed-management": "anchor test --skip-deploy tests/instructions/feed-management.test.ts",
+    "test:subscription": "anchor test --skip-deploy tests/instructions/subscription.test.ts",
+    "test:signature-verification": "anchor test --skip-deploy tests/instructions/signature-verification.test.ts",
+    "test:integration": "anchor test --skip-deploy tests/integration/integration.test.ts",
+    "test:instructions": "anchor test --skip-deploy tests/instructions/",
+    "test:all": "anchor test"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.1",
-    "@solana/web3.js": "^1.98.4"
+    "@solana/web3.js": "^1.98.4",
+    "anchor-bankrun": "^0.5.0",
+    "solana-bankrun": "^0.4.0"
   },
   "devDependencies": {
     "@noble/hashes": "^1.8.0",
