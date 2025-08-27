@@ -48,18 +48,18 @@ describe("Integration Tests: create_data_source + create_feed", () => {
     );
 
     await ctx.molphaProgram.methods
-      .createDataSource(dataSourceInfo)
-      .accounts({
-        payer: ctx.authority.publicKey,
+      .createDataSource(dataSourceInfo as any)
+      .accountsPartial({
         dataSource: dataSourcePDA,
-        systemProgram: SystemProgram.programId,
+        payer: ctx.authority.publicKey,
       })
       .rpc();
 
     // Step 2: Create feed using the data source
     const feedId = "integration-kraken-feed";
     const feedParams = {
-      feedId: Array.from(Buffer.from(feedId.padEnd(32, "\0"))),
+      name: feedId,
+      jobId: Array.from(Buffer.from(feedId.padEnd(32, "\0"))),
       feedType: { public: {} },
       minSignaturesThreshold: 3,
       frequency: new anchor.BN(600), // 10 minutes
@@ -67,23 +67,25 @@ describe("Integration Tests: create_data_source + create_feed", () => {
       dataSourceId: Array.from(dataSourceId),
     };
 
-    const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+    const [feedPDA] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("feed"),
         ctx.authority.publicKey.toBuffer(),
-        Buffer.from(feedId.padEnd(32, "\0")),
+        Buffer.from(feedParams.name),
+        Buffer.from([0]), // FeedType::Public = 0
+        Buffer.from([feedParams.minSignaturesThreshold]),
+        feedParams.frequency.toBuffer("le", 8),
+        Buffer.from(feedParams.jobId),
       ],
       ctx.molphaProgram.programId
     );
 
     await ctx.molphaProgram.methods
-      .createFeed(feedParams, dataSourceInfo)
-      .accounts({
-        feedAccount: feedAccountPDA,
+      .createFeed(feedParams as any, dataSourceInfo as any)
+      .accountsPartial({
+        feed: feedPDA,
         dataSource: dataSourcePDA,
-        ethLinkPda: null,
         authority: ctx.authority.publicKey,
-        systemProgram: SystemProgram.programId,
       })
       .rpc();
 
@@ -91,8 +93,8 @@ describe("Integration Tests: create_data_source + create_feed", () => {
     const dataSourceAccount = await ctx.molphaProgram.account.dataSource.fetch(
       dataSourcePDA
     );
-    const feedAccount = await ctx.molphaProgram.account.feedAccount.fetch(
-      feedAccountPDA
+    const feed = await ctx.molphaProgram.account.feed.fetch(
+      feedPDA
     );
 
     // Verify data source
@@ -101,12 +103,12 @@ describe("Integration Tests: create_data_source + create_feed", () => {
     assert.equal(dataSourceAccount.ownerEth.length, 20);
 
     // Verify feed
-    assert.ok(feedAccount.authority.equals(ctx.authority.publicKey));
-    assert.deepEqual(feedAccount.feedType, { public: {} });
-    assert.deepEqual(feedAccount.dataSourceId, Array.from(dataSourceId));
-    assert.equal(feedAccount.minSignaturesThreshold, 3);
-    assert.equal(feedAccount.frequency.toNumber(), 600);
-    assert.equal(feedAccount.ipfsCid, "QmIntegrationTest123");
+    assert.ok(feed.authority.equals(ctx.authority.publicKey));
+    assert.deepEqual(feed.feedType, { public: {} });
+    assert.deepEqual(feed.dataSourceId, Array.from(dataSourceId));
+    assert.equal(feed.minSignaturesThreshold, 3);
+    assert.equal(feed.frequency.toNumber(), 600);
+    assert.equal(feed.ipfsCid, "QmIntegrationTest123");
   });
 
   it("Creates data source and feed in single workflow - private data source with EthLink", async () => {
@@ -146,11 +148,10 @@ describe("Integration Tests: create_data_source + create_feed", () => {
     );
 
     await ctx.molphaProgram.methods
-      .createDataSource(dataSourceInfo)
-      .accounts({
-        payer: ctx.authority.publicKey,
+      .createDataSource(dataSourceInfo as any)
+      .accountsPartial({
         dataSource: dataSourcePDA,
-        systemProgram: SystemProgram.programId,
+        payer: ctx.authority.publicKey,
       })
       .rpc();
 
@@ -175,7 +176,8 @@ describe("Integration Tests: create_data_source + create_feed", () => {
     // Step 3: Create feed using the private data source
     const feedId = "integration-private-feed";
     const feedParams = {
-      feedId: Array.from(Buffer.from(feedId.padEnd(32, "\0"))),
+      name: feedId,
+      jobId: Array.from(Buffer.from(feedId.padEnd(32, "\0"))),
       feedType: { personal: {} },
       minSignaturesThreshold: 1,
       frequency: new anchor.BN(900), // 15 minutes
@@ -183,23 +185,25 @@ describe("Integration Tests: create_data_source + create_feed", () => {
       dataSourceId: Array.from(dataSourceId),
     };
 
-    const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+    const [feedPDA] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("feed"),
         ctx.authority.publicKey.toBuffer(),
-        Buffer.from(feedId.padEnd(32, "\0")),
+        Buffer.from(feedParams.name),
+        Buffer.from([1]), // FeedType::Personal = 1
+        Buffer.from([feedParams.minSignaturesThreshold]),
+        feedParams.frequency.toBuffer("le", 8),
+        Buffer.from(feedParams.jobId),
       ],
       ctx.molphaProgram.programId
     );
 
     await ctx.molphaProgram.methods
-      .createFeed(feedParams, dataSourceInfo)
-      .accounts({
-        feedAccount: feedAccountPDA,
+      .createFeed(feedParams as any, dataSourceInfo as any)
+      .accountsPartial({
+        feed: feedPDA,
         dataSource: dataSourcePDA,
-        ethLinkPda: ethLinkPDA,
         authority: ctx.authority.publicKey,
-        systemProgram: SystemProgram.programId,
       })
       .rpc();
 
@@ -207,8 +211,8 @@ describe("Integration Tests: create_data_source + create_feed", () => {
     const dataSourceAccount = await ctx.molphaProgram.account.dataSource.fetch(
       dataSourcePDA
     );
-    const feedAccount = await ctx.molphaProgram.account.feedAccount.fetch(
-      feedAccountPDA
+    const feed = await ctx.molphaProgram.account.feed.fetch(
+      feedPDA
     );
 
     // Verify data source
@@ -216,8 +220,8 @@ describe("Integration Tests: create_data_source + create_feed", () => {
     assert.deepEqual(dataSourceAccount.dataSourceType, { private: {} });
 
     // Verify feed
-    assert.deepEqual(feedAccount.feedType, { personal: {} });
-    assert.deepEqual(feedAccount.dataSourceId, Array.from(dataSourceId));
+    assert.deepEqual(feed.feedType, { personal: {} });
+    assert.deepEqual(feed.dataSourceId, Array.from(dataSourceId));
   });
 
   it("Creates multiple feeds using the same data source", async () => {
@@ -258,11 +262,10 @@ describe("Integration Tests: create_data_source + create_feed", () => {
     );
 
     await ctx.molphaProgram.methods
-      .createDataSource(dataSourceInfo)
-      .accounts({
-        payer: ctx.authority.publicKey,
+      .createDataSource(dataSourceInfo as any)
+      .accountsPartial({
         dataSource: dataSourcePDA,
-        systemProgram: SystemProgram.programId,
+        payer: ctx.authority.publicKey,
       })
       .rpc();
 
@@ -286,7 +289,8 @@ describe("Integration Tests: create_data_source + create_feed", () => {
 
     for (const config of feedConfigs) {
       const feedParams = {
-        feedId: Array.from(Buffer.from(config.id.padEnd(32, "\0"))),
+        name: config.id,
+        jobId: Array.from(Buffer.from(config.id.padEnd(32, "\0"))),
         feedType: config.type,
         minSignaturesThreshold: config.threshold,
         frequency: new anchor.BN(config.frequency),
@@ -294,36 +298,39 @@ describe("Integration Tests: create_data_source + create_feed", () => {
         dataSourceId: Array.from(dataSourceId),
       };
 
-      const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+      const feedTypeValue = config.type.public ? 0 : 1; // Public = 0, Personal = 1
+      const [feedPDA] = PublicKey.findProgramAddressSync(
         [
           Buffer.from("feed"),
           ctx.authority.publicKey.toBuffer(),
-          Buffer.from(config.id.padEnd(32, "\0")),
+          Buffer.from(feedParams.name),
+          Buffer.from([feedTypeValue]),
+          Buffer.from([feedParams.minSignaturesThreshold]),
+          feedParams.frequency.toBuffer("le", 8),
+          Buffer.from(feedParams.jobId),
         ],
         ctx.molphaProgram.programId
       );
 
       await ctx.molphaProgram.methods
-        .createFeed(feedParams, dataSourceInfo)
-        .accounts({
-          feedAccount: feedAccountPDA,
+        .createFeed(feedParams as any, dataSourceInfo as any)
+        .accountsPartial({
+          feed: feedPDA,
           dataSource: dataSourcePDA,
-          ethLinkPda: null,
           authority: ctx.authority.publicKey,
-          systemProgram: SystemProgram.programId,
         })
         .rpc();
 
-      createdFeeds.push({ pda: feedAccountPDA, config });
+      createdFeeds.push({ pda: feedPDA, config });
     }
 
     // Verify all feeds were created and reference the same data source
     for (const { pda, config } of createdFeeds) {
-      const feedAccount = await ctx.molphaProgram.account.feedAccount.fetch(pda);
-      assert.deepEqual(feedAccount.dataSourceId, Array.from(dataSourceId));
-      assert.deepEqual(feedAccount.feedType, config.type);
-      assert.equal(feedAccount.minSignaturesThreshold, config.threshold);
-      assert.equal(feedAccount.frequency.toNumber(), config.frequency);
+      const feed = await ctx.molphaProgram.account.feed.fetch(pda);
+      assert.deepEqual(feed.dataSourceId, Array.from(dataSourceId));
+      assert.deepEqual(feed.feedType, config.type);
+      assert.equal(feed.minSignaturesThreshold, config.threshold);
+      assert.equal(feed.frequency.toNumber(), config.frequency);
     }
   });
 
@@ -364,7 +371,8 @@ describe("Integration Tests: create_data_source + create_feed", () => {
 
     const feedId = "feed-with-missing-ds";
     const feedParams = {
-      feedId: Array.from(Buffer.from(feedId.padEnd(32, "\0"))),
+      name: feedId,
+      jobId: Array.from(Buffer.from(feedId.padEnd(32, "\0"))),
       feedType: { public: {} },
       minSignaturesThreshold: 1,
       frequency: new anchor.BN(300),
@@ -372,24 +380,26 @@ describe("Integration Tests: create_data_source + create_feed", () => {
       dataSourceId: Array.from(dataSourceId),
     };
 
-    const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+    const [feedPDA] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("feed"),
         ctx.authority.publicKey.toBuffer(),
-        Buffer.from(feedId.padEnd(32, "\0")),
+        Buffer.from(feedParams.name),
+        Buffer.from([0]), // FeedType::Public = 0
+        Buffer.from([feedParams.minSignaturesThreshold]),
+        feedParams.frequency.toBuffer("le", 8),
+        Buffer.from(feedParams.jobId),
       ],
       ctx.molphaProgram.programId
     );
 
     // This should succeed because create_feed uses init_if_needed for data source
     await ctx.molphaProgram.methods
-      .createFeed(feedParams, dataSourceInfo)
-      .accounts({
-        feedAccount: feedAccountPDA,
+      .createFeed(feedParams as any, dataSourceInfo as any)
+      .accountsPartial({
+        feed: feedPDA,
         dataSource: nonExistentDataSourcePDA,
-        ethLinkPda: null,
         authority: ctx.authority.publicKey,
-        systemProgram: SystemProgram.programId,
       })
       .rpc();
 
@@ -397,11 +407,11 @@ describe("Integration Tests: create_data_source + create_feed", () => {
     const dataSourceAccount = await ctx.molphaProgram.account.dataSource.fetch(
       nonExistentDataSourcePDA
     );
-    const feedAccount = await ctx.molphaProgram.account.feedAccount.fetch(
-      feedAccountPDA
+    const feed = await ctx.molphaProgram.account.feed.fetch(
+      feedPDA
     );
 
     assert.deepEqual(dataSourceAccount.id, Array.from(dataSourceId));
-    assert.deepEqual(feedAccount.dataSourceId, Array.from(dataSourceId));
+    assert.deepEqual(feed.dataSourceId, Array.from(dataSourceId));
   });
 });

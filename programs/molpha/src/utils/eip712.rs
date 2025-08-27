@@ -93,18 +93,13 @@ pub fn get_permit_grantee_type_hash() -> [u8; 32] {
 /// Build the struct hash for PermitGrantee - match Solidity contract exactly
 pub fn build_permit_grantee_struct_hash(owner_eth: &[u8; 20], grantee: &[u8; 32]) -> [u8; 32] {
     let type_hash = get_permit_grantee_type_hash();
-    
+
     // Pad owner_eth to 32 bytes (left-padded with zeros for address type)
     let mut owner_eth_padded = [0u8; 32];
     owner_eth_padded[12..32].copy_from_slice(owner_eth);
 
     // Match Solidity parameter order: (ownerEth, grantee)
-    keccak::hashv(&[
-        &type_hash,
-        &owner_eth_padded,
-        grantee,
-    ])
-    .to_bytes()
+    keccak::hashv(&[&type_hash, &owner_eth_padded, grantee]).to_bytes()
 }
 
 /// Main function to compute EIP-712 digest for PermitGrantee

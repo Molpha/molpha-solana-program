@@ -19,7 +19,7 @@ impl EthLink {
         20 + // owner_eth
         32 + // grantee
         8 +  // created_at
-        1;   // bump
+        1; // bump
 
     /// Get the PDA seeds for this account
     pub fn get_seeds<'a>(owner_eth: &'a [u8; 20], grantee: &'a [u8; 32]) -> [&'a [u8]; 3] {

@@ -1,15 +1,15 @@
 use crate::error::FeedError;
-use crate::state::{FeedAccount, FeedType};
+use crate::state::{Feed, FeedType};
 use anchor_lang::prelude::*;
 
 pub fn update_feed_config(
     ctx: Context<UpdateFeedConfig>,
     params: UpdateFeedConfigParams,
 ) -> Result<()> {
-    let feed_account = &mut ctx.accounts.feed_account;
+    let feed = &mut ctx.accounts.feed;
 
     require!(
-        feed_account.feed_type == FeedType::Personal,
+        feed.feed_type == FeedType::Personal,
         FeedError::NotSupported
     );
     require!(!params.ipfs_cid.is_empty(), FeedError::InvalidFeedConfig);
@@ -18,9 +18,9 @@ pub fn update_feed_config(
         FeedError::InvalidFeedConfig
     );
 
-    feed_account.min_signatures_threshold = params.min_signatures_threshold;
-    feed_account.frequency = params.frequency;
-    feed_account.ipfs_cid = params.ipfs_cid;
+    feed.min_signatures_threshold = params.min_signatures_threshold;
+    feed.frequency = params.frequency;
+    feed.ipfs_cid = params.ipfs_cid;
 
     Ok(())
 }
@@ -31,7 +31,7 @@ pub struct UpdateFeedConfig<'info> {
         mut,
         has_one = authority
     )]
-    pub feed_account: Account<'info, FeedAccount>,
+    pub feed: Account<'info, Feed>,
     pub authority: Signer<'info>,
 }
 

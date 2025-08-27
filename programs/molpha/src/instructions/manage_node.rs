@@ -1,5 +1,5 @@
 use crate::error::NodeRegistryError;
-use crate::state::{NodeAccount, NodeRegistry, MAX_NODES};
+use crate::state::{Node, NodeRegistry, MAX_NODES};
 use anchor_lang::prelude::*;
 
 pub fn add_node(ctx: Context<AddNode>, node_pubkey: Pubkey) -> Result<()> {
@@ -15,12 +15,12 @@ pub fn add_node(ctx: Context<AddNode>, node_pubkey: Pubkey) -> Result<()> {
     );
 
     // Create the node PDA account
-    let node_account = &mut ctx.accounts.node_account;
-    node_account.authority = ctx.accounts.authority.key();
-    node_account.node_pubkey = node_pubkey;
-    node_account.is_active = true;
-    node_account.created_at = Clock::get()?.unix_timestamp;
-    node_account.last_active = Clock::get()?.unix_timestamp;
+    let node = &mut ctx.accounts.node;
+    node.authority = ctx.accounts.authority.key();
+    node.node_pubkey = node_pubkey;
+    node.is_active = true;
+    node.created_at = Clock::get()?.unix_timestamp;
+    node.last_active = Clock::get()?.unix_timestamp;
 
     // Add to the registry
     node_registry.nodes.push(node_pubkey);
@@ -47,19 +47,19 @@ pub struct AddNode<'info> {
         has_one = authority
     )]
     pub node_registry: Account<'info, NodeRegistry>,
-    
+
     #[account(
         init,
         payer = authority,
-        space = NodeAccount::SPACE,
-        seeds = [NodeAccount::SEED_PREFIX, node_pubkey.as_ref()],
+        space = Node::SPACE,
+        seeds = [Node::SEED_PREFIX, node_pubkey.as_ref()],
         bump
     )]
-    pub node_account: Account<'info, NodeAccount>,
-    
+    pub node: Account<'info, Node>,
+
     #[account(mut)]
     pub authority: Signer<'info>,
-    
+
     pub system_program: Program<'info, System>,
 }
 
@@ -71,17 +71,17 @@ pub struct RemoveNode<'info> {
         has_one = authority
     )]
     pub node_registry: Account<'info, NodeRegistry>,
-    
+
     #[account(
         mut,
         close = authority,
-        seeds = [NodeAccount::SEED_PREFIX, node_pubkey.as_ref()],
+        seeds = [Node::SEED_PREFIX, node_pubkey.as_ref()],
         bump
     )]
-    pub node_account: Account<'info, NodeAccount>,
-    
+    pub node: Account<'info, Node>,
+
     #[account(mut)]
     pub authority: Signer<'info>,
-    
+
     pub system_program: Program<'info, System>,
 }

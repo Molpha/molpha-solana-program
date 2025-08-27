@@ -1,8 +1,8 @@
-use anchor_lang::prelude::*;
-use anchor_lang::solana_program::secp256k1_recover::secp256k1_recover;
 use crate::error::DataSourceError;
 use crate::state::EthLink;
 use crate::utils::eip712;
+use anchor_lang::prelude::*;
+use anchor_lang::solana_program::secp256k1_recover::secp256k1_recover;
 
 /// Revoke permit instruction - closes the EthLink PDA after signature verification
 pub fn revoke_permit(
@@ -22,16 +22,26 @@ pub fn revoke_permit(
         .map_err(|_| error!(DataSourceError::InvalidEthereumAddress))?;
 
     // Convert recovered public key to Ethereum address (last 20 bytes of keccak hash)
-    let pubkey_hash = anchor_lang::solana_program::keccak::hash(&recovered_pubkey.to_bytes()).to_bytes();
+    let pubkey_hash =
+        anchor_lang::solana_program::keccak::hash(&recovered_pubkey.to_bytes()).to_bytes();
     let mut recovered_eth = [0u8; 20];
     recovered_eth.copy_from_slice(&pubkey_hash[12..32]);
 
-    require!(recovered_eth == owner_eth, DataSourceError::PermitRecoveredAddressMismatch);
+    require!(
+        recovered_eth == owner_eth,
+        DataSourceError::PermitRecoveredAddressMismatch
+    );
 
     // 3) Verify the EthLink exists and matches
     let eth_link_account = &ctx.accounts.eth_link_pda;
-    require!(eth_link_account.owner_eth == owner_eth, DataSourceError::EthLinkNotFound);
-    require!(eth_link_account.grantee == grantee, DataSourceError::EthLinkNotFound);
+    require!(
+        eth_link_account.owner_eth == owner_eth,
+        DataSourceError::EthLinkNotFound
+    );
+    require!(
+        eth_link_account.grantee == grantee,
+        DataSourceError::EthLinkNotFound
+    );
 
     // 4) Close the EthLink PDA (transfer lamports back to payer)
     // The close = payer attribute will handle this automatically

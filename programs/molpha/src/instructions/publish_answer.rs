@@ -1,15 +1,17 @@
 use crate::error::FeedError;
-use crate::state::{Answer, FeedAccount, FeedType, NodeRegistry, ProtocolConfig, SubscriptionAccount, MAX_HISTORY};
+use crate::state::{
+    feed, Answer, Feed, FeedType, NodeRegistry, ProtocolConfig, MAX_HISTORY
+};
 use crate::utils::parse_ed25519_instruction;
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{ed25519_program, sysvar};
 
 pub fn publish_answer(ctx: Context<PublishAnswer>, answer: Answer) -> Result<()> {
-    let feed_account = &mut ctx.accounts.feed_account;
+    let feed = &mut ctx.accounts.feed;
     let clock = Clock::get()?;
 
     require!(
-        answer.timestamp > feed_account.latest_answer.timestamp,
+        answer.timestamp > feed.latest_answer.timestamp,
         FeedError::PastTimestamp
     );
     require!(
@@ -42,33 +44,29 @@ pub fn publish_answer(ctx: Context<PublishAnswer>, answer: Answer) -> Result<()>
     }
 
     require!(
-        unique_valid_signers.len() >= feed_account.min_signatures_threshold as usize,
+        unique_valid_signers.len() >= feed.min_signatures_threshold as usize,
         FeedError::NotEnoughSignatures
     );
 
-    // Hybrid Logic: Charge a fee only for Personal Feeds
-    if feed_account.feed_type == FeedType::Personal {
-        let subscription_account = &mut ctx.accounts.subscription_account.as_mut().unwrap();
-        let config = &ctx.accounts.protocol_config;
+    let config = &ctx.accounts.protocol_config;
 
-        // Check balance and deduct fee
-        require!(
-            subscription_account.balance >= config.fee_per_update,
-            FeedError::InsufficientBalance
-        );
-        subscription_account.balance -= config.fee_per_update;
-    }
+    // Check balance and deduct fee
+    require!(
+        feed.balance >= config.fee_per_update,
+        FeedError::InsufficientBalance
+    );
+    feed.balance -= config.fee_per_update;
 
-    feed_account.latest_answer = answer;
+    feed.latest_answer = answer;
 
     // Use a ring buffer for history
-    if feed_account.answer_history.len() < MAX_HISTORY {
-        feed_account.answer_history.push(answer);
-        feed_account.history_idx = feed_account.answer_history.len() as u64;
+    if feed.answer_history.len() < MAX_HISTORY {
+        feed.answer_history.push(answer);
+        feed.history_idx = feed.answer_history.len() as u64;
     } else {
-        let history_idx = feed_account.history_idx as usize;
-        feed_account.answer_history[history_idx] = answer;
-        feed_account.history_idx = (history_idx as u64 + 1) % MAX_HISTORY as u64;
+        let history_idx = feed.history_idx as usize;
+        feed.answer_history[history_idx] = answer;
+        feed.history_idx = (history_idx as u64 + 1) % MAX_HISTORY as u64;
     }
 
     msg!(
@@ -82,17 +80,13 @@ pub fn publish_answer(ctx: Context<PublishAnswer>, answer: Answer) -> Result<()>
 #[derive(Accounts)]
 pub struct PublishAnswer<'info> {
     #[account(mut)]
-    pub feed_account: Account<'info, FeedAccount>,
-    
-    /// CHECK: This is safe. We only read the nodes list for validation.
+    pub feed: Account<'info, Feed>,
+
     pub node_registry: Account<'info, NodeRegistry>,
-    
+
     pub protocol_config: Account<'info, ProtocolConfig>,
-    /// CHECK: This is safe. The subscription account is only required for personal feeds,
-    /// and we check its address and balance inside the instruction.
-    #[account(mut)]
-    pub subscription_account: Option<Account<'info, SubscriptionAccount>>,
-    /// CHECK: This is the Instructions sysvar, which is safe to use.
+
+    /// CHECK: This is safe. We only read the instructions sysvar for validation.
     #[account(address = sysvar::instructions::ID)]
     pub instructions: UncheckedAccount<'info>,
 }

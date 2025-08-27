@@ -5,11 +5,11 @@ use crate::utils::eip712;
 #[account]
 #[derive(Default)]
 pub struct DataSource {
-    pub id: [u8; 32], // keccak256 hash of the data
-    pub owner_eth: [u8; 20], // Ethereum address of the owner
+    pub id: [u8; 32],                     // keccak256 hash of the data
+    pub owner_eth: [u8; 20],              // Ethereum address of the owner
     pub data_source_type: DataSourceType, // Type of data source
-    pub created_at: i64, // Creation timestamp
-    pub bump: u8, // PDA bump
+    pub created_at: i64,                  // Creation timestamp
+    pub bump: u8,                         // PDA bump
 }
 
 impl DataSource {
@@ -41,8 +41,8 @@ impl DataSourceType {
 /// DataSourceInit - matches EIP-712 structure exactly
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct DataSourceInfo {
-    pub data_source_type: DataSourceType,  // type field (first in EIP-712)
-    pub source: String,                    // source field (second in EIP-712)
+    pub data_source_type: DataSourceType, // type field (first in EIP-712)
+    pub source: String,                   // source field (second in EIP-712)
     pub owner_eth: [u8; 20],              // owner field (third in EIP-712)
     pub name: String,                     // name field (fourth in EIP-712)
     pub sig: [u8; 65],

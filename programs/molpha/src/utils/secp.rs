@@ -33,9 +33,11 @@ pub fn verify_eth_signature(
     // Verify the signature matches what was provided
     let provided_sig = &sig[..64]; // r,s components
     let provided_recovery_id = sig[64];
-    
+
     if secp_data.signature != provided_sig || secp_data.recovery_id != provided_recovery_id {
-        return Err(error!(crate::error::DataSourceError::InvalidSecp256k1Instruction));
+        return Err(error!(
+            crate::error::DataSourceError::InvalidSecp256k1Instruction
+        ));
     }
 
     // Recover the Ethereum address from the public key

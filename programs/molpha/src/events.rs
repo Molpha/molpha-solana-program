@@ -1,5 +1,5 @@
-use anchor_lang::prelude::*;
 use crate::state::{DataSourceType, FeedType};
+use anchor_lang::prelude::*;
 
 #[event]
 pub struct DataSourceCreated {

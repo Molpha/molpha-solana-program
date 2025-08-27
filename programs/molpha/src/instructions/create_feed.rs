@@ -1,11 +1,17 @@
 use anchor_lang::prelude::*;
 
 use crate::error::FeedError;
-use crate::state::{FeedAccount, FeedType, MAX_HISTORY, DataSource, DataSourceInfo, DataSourceType, EthLink};
-use crate::events::{FeedCreated, DataSourceCreated};
+use crate::events::{DataSourceCreated, FeedCreated};
+use crate::state::{
+    DataSource, DataSourceInfo, DataSourceType, EthLink, Feed, FeedType, MAX_HISTORY,
+};
 use crate::utils;
 
-pub fn create_feed(ctx: Context<CreateFeed>, params: CreateFeedParams, data_source_info: DataSourceInfo) -> Result<()> {
+pub fn create_feed(
+    ctx: Context<CreateFeed>,
+    params: CreateFeedParams,
+    data_source_info: DataSourceInfo,
+) -> Result<()> {
     require!(
         params.min_signatures_threshold > 0,
         FeedError::InvalidFeedConfig
@@ -44,25 +50,26 @@ pub fn create_feed(ctx: Context<CreateFeed>, params: CreateFeedParams, data_sour
             created_at: now,
         });
     }
-    
-    let feed_account = &mut ctx.accounts.feed_account;
-    feed_account.authority = ctx.accounts.authority.key();
-    feed_account.feed_type = params.feed_type;
-    feed_account.min_signatures_threshold = params.min_signatures_threshold;
-    feed_account.frequency = params.frequency;
-    feed_account.ipfs_cid = params.ipfs_cid;
-    feed_account.feed_id = params.feed_id;
-    feed_account.data_source_id = data_source_id;
-    feed_account.answer_history = Vec::with_capacity(MAX_HISTORY);
+
+    let feed = &mut ctx.accounts.feed;
+    feed.name = params.name;
+    feed.authority = ctx.accounts.authority.key();
+    feed.feed_type = params.feed_type;
+    feed.min_signatures_threshold = params.min_signatures_threshold;
+    feed.frequency = params.frequency;
+    feed.ipfs_cid = params.ipfs_cid;
+    feed.job_id = params.job_id;
+    feed.data_source_id = data_source_id;
+    feed.answer_history = Vec::with_capacity(MAX_HISTORY);
 
     emit!(FeedCreated {
-        id: feed_account.feed_id,
-        authority: feed_account.authority,
-        feed_type: feed_account.feed_type,
-        min_signatures_threshold: feed_account.min_signatures_threshold,
-        frequency: feed_account.frequency,
-        ipfs_cid: feed_account.ipfs_cid.clone(),
-        data_source_id: feed_account.data_source_id,
+        id: feed.job_id,
+        authority: feed.authority,
+        feed_type: feed.feed_type,
+        min_signatures_threshold: feed.min_signatures_threshold,
+        frequency: feed.frequency,
+        ipfs_cid: feed.ipfs_cid.clone(),
+        data_source_id: feed.data_source_id,
         created_at: now,
     });
 
@@ -75,12 +82,20 @@ pub struct CreateFeed<'info> {
     #[account(
         init,
         payer = authority,
-        space = FeedAccount::SPACE,
-        seeds = [FeedAccount::SEED_PREFIX, authority.key().as_ref(), params.feed_id.as_ref()],
+        space = Feed::SPACE,
+        seeds = [
+            Feed::SEED_PREFIX,
+            authority.key().as_ref(),
+            params.name.as_bytes().as_ref(),
+            params.feed_type.to_seed().as_ref(),
+            params.min_signatures_threshold.to_le_bytes().as_ref(),
+            params.frequency.to_le_bytes().as_ref(),
+            params.job_id.as_ref(),
+        ],
         bump
     )]
-    pub feed_account: Account<'info, FeedAccount>,
-    
+    pub feed: Account<'info, Feed>,
+
     /// CHECK: This account is verified to exist and be accessible
     #[account(
         init_if_needed,
@@ -97,14 +112,14 @@ pub struct CreateFeed<'info> {
         payer = authority,
         space = EthLink::SPACE,
         seeds = [
-            EthLink::SEED_PREFIX, 
+            EthLink::SEED_PREFIX,
             data_source_info.owner_eth.as_ref(),
             authority.key().as_ref(),
         ],
         bump,
     )]
     pub eth_link_pda: Option<Account<'info, EthLink>>,
-    
+
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -112,10 +127,11 @@ pub struct CreateFeed<'info> {
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
 pub struct CreateFeedParams {
-    pub feed_id: [u8; 32],
+    pub name: String,
+    pub data_source_id: [u8; 32],
+    pub job_id: [u8; 32],
     pub feed_type: FeedType,
     pub min_signatures_threshold: u8,
     pub frequency: u64,
     pub ipfs_cid: String,
-    pub data_source_id: [u8; 32],
 }

@@ -1,18 +1,17 @@
 use anchor_lang::prelude::*;
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Default, InitSpace)]
 pub enum FeedType {
     #[default]
     Public,
     Personal,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default)]
-pub struct Answer {
-    pub value: [u8; 32],
-    pub timestamp: i64,
-}
-
-impl Answer {
-    pub const SPACE: usize = 32 + 8;
+impl FeedType {
+    pub fn to_u8(&self) -> u8 {
+        *self as u8
+    }
+    pub fn to_seed(&self) -> [u8; 1] {
+        [self.to_u8()]
+    }
 }

@@ -5,7 +5,6 @@ import "./instructions/node-registry.test";
 import "./instructions/create-data-source.test";
 import "./instructions/create-feed.test";
 import "./instructions/permit.test";
-import "./instructions/feed-management.test";
 import "./instructions/subscription.test";
 import "./instructions/signature-verification.test";
 import "./integration/integration.test";

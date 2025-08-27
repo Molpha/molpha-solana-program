@@ -1,12 +1,12 @@
 use anchor_lang::prelude::*;
 
-use crate::state::{DataSource, DataSourceInfo};
 use crate::events::DataSourceCreated;
+use crate::state::{DataSource, DataSourceInfo};
 use crate::utils;
 
 pub fn create_data_source(
     ctx: Context<CreateDataSource>,
-    data: DataSourceInfo,      // same fields as EIP-712
+    data: DataSourceInfo, // same fields as EIP-712
 ) -> Result<()> {
     // Use the reusable verification function
     utils::verify_data_source_signature(&data)?;

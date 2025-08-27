@@ -1,8 +1,8 @@
-use anchor_lang::prelude::*;
-use anchor_lang::solana_program::secp256k1_recover::secp256k1_recover;
 use crate::error::DataSourceError;
 use crate::state::EthLink;
 use crate::utils::eip712;
+use anchor_lang::prelude::*;
+use anchor_lang::solana_program::secp256k1_recover::secp256k1_recover;
 
 /// Permit instruction - creates an EthLink PDA authorizing grantee for using Ethereum-owned data sources
 pub fn permit(
@@ -22,11 +22,15 @@ pub fn permit(
         .map_err(|_| error!(DataSourceError::InvalidEthereumAddress))?;
 
     // Convert recovered public key to Ethereum address (last 20 bytes of keccak hash)
-    let pubkey_hash = anchor_lang::solana_program::keccak::hash(&recovered_pubkey.to_bytes()).to_bytes();
+    let pubkey_hash =
+        anchor_lang::solana_program::keccak::hash(&recovered_pubkey.to_bytes()).to_bytes();
     let mut recovered_eth = [0u8; 20];
     recovered_eth.copy_from_slice(&pubkey_hash[12..32]);
 
-    require!(recovered_eth == owner_eth, DataSourceError::PermitRecoveredAddressMismatch);
+    require!(
+        recovered_eth == owner_eth,
+        DataSourceError::PermitRecoveredAddressMismatch
+    );
 
     // 3) Create the EthLink PDA
     let clock = Clock::get()?;

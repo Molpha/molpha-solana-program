@@ -11,6 +11,7 @@
     "test:feed-management": "anchor test --skip-deploy tests/instructions/feed-management.test.ts",
     "test:subscription": "anchor test --skip-deploy tests/instructions/subscription.test.ts",
     "test:signature-verification": "anchor test --skip-deploy tests/instructions/signature-verification.test.ts",
+    "test:publish-answer": "anchor test --skip-deploy tests/instructions/publish-answer.test.ts",
     "test:integration": "anchor test --skip-deploy tests/integration/integration.test.ts",
     "test:instructions": "anchor test --skip-deploy tests/instructions/",
     "test:all": "anchor test"

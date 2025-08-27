@@ -144,11 +144,11 @@ describe("Create Feed Instruction", () => {
   });
 
   it("Successfully creates a public feed with existing data source", async () => {
-    const feedId = "public-btc-feed";
+    const jobId = "public-btc-feed";
     const feedParams = createFeedParams(
-      feedId,
+      jobId,
       { public: {} },
-      publicDataSourceId
+      publicDataSourceId,
     );
 
     const dataSourceInfo = createTestDataSourceInfo(
@@ -159,11 +159,15 @@ describe("Create Feed Instruction", () => {
       testDataSources.public.signature
     );
 
-    const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+    const [feedPDA] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("feed"),
         ctx.authority.publicKey.toBuffer(),
-        Buffer.from(feedId.padEnd(32, "\0")),
+        Buffer.from(feedParams.name),
+        Buffer.from([0]),
+        Buffer.from([feedParams.minSignaturesThreshold]),
+        feedParams.frequency.toBuffer("le", 8),
+        Buffer.from(feedParams.jobId),
       ],
       ctx.molphaProgram.programId
     );
@@ -171,7 +175,7 @@ describe("Create Feed Instruction", () => {
     await ctx.molphaProgram.methods
       .createFeed(feedParams, dataSourceInfo)
       .accounts({
-        feedAccount: feedAccountPDA,
+        feed: feedPDA,
         dataSource: publicDataSourcePDA,
         ethLinkPda: null,
         authority: ctx.authority.publicKey,
@@ -179,27 +183,27 @@ describe("Create Feed Instruction", () => {
       })
       .rpc();
 
-    const feedAccount = await ctx.molphaProgram.account.feedAccount.fetch(
-      feedAccountPDA
+    const feed = await ctx.molphaProgram.account.feed.fetch(
+      feedPDA
     );
 
     // Verify the feed was created correctly
-    assert.ok(feedAccount.authority.equals(ctx.authority.publicKey));
-    assert.deepEqual(feedAccount.feedType, { public: {} });
-    assert.equal(feedAccount.minSignaturesThreshold, 2);
-    assert.equal(feedAccount.frequency.toNumber(), 300);
-    assert.equal(feedAccount.ipfsCid, "QmTestCID123456789");
-    assert.deepEqual(feedAccount.dataSourceId, Array.from(publicDataSourceId));
+    assert.ok(feed.authority.equals(ctx.authority.publicKey));
+    assert.deepEqual(feed.feedType, { public: {} });
+    assert.equal(feed.minSignaturesThreshold, 2);
+    assert.equal(feed.frequency.toNumber(), 300);
+    assert.equal(feed.ipfsCid, "QmTestCID123456789");
+    assert.deepEqual(feed.dataSourceId, Array.from(publicDataSourceId));
     assert.deepEqual(
-      feedAccount.feedId,
-      Array.from(Buffer.from(feedId.padEnd(32, "\0")))
+      feed.jobId,
+      Array.from(Buffer.from(jobId.padEnd(32, "\0")))
     );
   });
 
   it("Successfully creates a personal feed with existing data source", async () => {
-    const feedId = "personal-btc-feed";
+    const jobId = "personal-btc-feed";
     const feedParams = createFeedParams(
-      feedId,
+      jobId,
       { personal: {} },
       publicDataSourceId
     );
@@ -212,19 +216,25 @@ describe("Create Feed Instruction", () => {
       testDataSources.public.signature
     );
 
-    const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+    const [feedPDA] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("feed"),
         ctx.authority.publicKey.toBuffer(),
-        Buffer.from(feedId.padEnd(32, "\0")),
+        Buffer.from(feedParams.name),
+        Buffer.from([1]),
+        Buffer.from([feedParams.minSignaturesThreshold]),
+        feedParams.frequency.toBuffer("le", 8),
+        Buffer.from(feedParams.jobId),
       ],
       ctx.molphaProgram.programId
     );
 
+    
+
     await ctx.molphaProgram.methods
       .createFeed(feedParams, dataSourceInfo)
       .accounts({
-        feedAccount: feedAccountPDA,
+        feed: feedPDA,
         dataSource: publicDataSourcePDA,
         ethLinkPda: null,
         authority: ctx.authority.publicKey,
@@ -232,13 +242,13 @@ describe("Create Feed Instruction", () => {
       })
       .rpc();
 
-    const feedAccount = await ctx.molphaProgram.account.feedAccount.fetch(
-      feedAccountPDA
+    const feed = await ctx.molphaProgram.account.feed.fetch(
+      feedPDA
     );
 
     // Verify the feed was created correctly
-    assert.deepEqual(feedAccount.feedType, { personal: {} });
-    assert.equal(feedAccount.minSignaturesThreshold, 2);
+    assert.deepEqual(feed.feedType, { personal: {} });
+    assert.equal(feed.minSignaturesThreshold, 2);
   });
 
   it("Successfully creates a feed with new data source (init_if_needed)", async () => {
@@ -276,18 +286,22 @@ describe("Create Feed Instruction", () => {
       ctx.molphaProgram.programId
     );
 
-    const feedId = "binance-btc-feed";
+    const jobId = "binance-btc-feed";
     const feedParams = createFeedParams(
-      feedId,
+      jobId,
       { public: {} },
       newDataSourceId
     );
 
-    const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+    const [feedPDA] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("feed"),
         ctx.authority.publicKey.toBuffer(),
-        Buffer.from(feedId.padEnd(32, "\0")),
+        Buffer.from(feedParams.name),
+        Buffer.from([0]),
+        Buffer.from([feedParams.minSignaturesThreshold]),
+        feedParams.frequency.toBuffer("le", 8),
+        Buffer.from(feedParams.jobId),
       ],
       ctx.molphaProgram.programId
     );
@@ -295,7 +309,7 @@ describe("Create Feed Instruction", () => {
     await ctx.molphaProgram.methods
       .createFeed(feedParams, newDataSourceInfo)
       .accounts({
-        feedAccount: feedAccountPDA,
+        feed: feedPDA,
         dataSource: newDataSourcePDA,
         ethLinkPda: null,
         authority: ctx.authority.publicKey,
@@ -304,21 +318,21 @@ describe("Create Feed Instruction", () => {
       .rpc();
 
     // Verify both feed and data source were created
-    const feedAccount = await ctx.molphaProgram.account.feedAccount.fetch(
-      feedAccountPDA
+    const feed = await ctx.molphaProgram.account.feed.fetch(
+      feedPDA
     );
     const dataSourceAccount = await ctx.molphaProgram.account.dataSource.fetch(
       newDataSourcePDA
     );
 
-    assert.deepEqual(feedAccount.dataSourceId, Array.from(newDataSourceId));
+    assert.deepEqual(feed.dataSourceId, Array.from(newDataSourceId));
     assert.deepEqual(dataSourceAccount.id, Array.from(newDataSourceId));
   });
 
   it("Successfully creates a private feed with EthLink", async () => {
-    const feedId = "private-feed-with-link";
+    const jobId = "private-feed-with-link";
     const feedParams = createFeedParams(
-      feedId,
+      jobId,
       { personal: {} },
       privateDataSourceId
     );
@@ -331,11 +345,15 @@ describe("Create Feed Instruction", () => {
       testDataSources.private.signature
     );
 
-    const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+    const [feedPDA] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("feed"),
         ctx.authority.publicKey.toBuffer(),
-        Buffer.from(feedId.padEnd(32, "\0")),
+        Buffer.from(feedParams.name),
+        Buffer.from([1]),
+        Buffer.from([feedParams.minSignaturesThreshold]),
+        feedParams.frequency.toBuffer("le", 8),
+        Buffer.from(feedParams.jobId),
       ],
       ctx.molphaProgram.programId
     );
@@ -357,7 +375,7 @@ describe("Create Feed Instruction", () => {
     await ctx.molphaProgram.methods
       .createFeed(feedParams, dataSourceInfo)
       .accounts({
-        feedAccount: feedAccountPDA,
+        feed: feedPDA,
         dataSource: privateDataSourcePDA,
         ethLinkPda: ethLinkPDA,
         authority: ctx.authority.publicKey,
@@ -365,16 +383,17 @@ describe("Create Feed Instruction", () => {
       })
       .rpc();
 
-    const feedAccount = await ctx.molphaProgram.account.feedAccount.fetch(
-      feedAccountPDA
+    const feed = await ctx.molphaProgram.account.feed.fetch(
+      feedPDA
     );
-    assert.deepEqual(feedAccount.dataSourceId, Array.from(privateDataSourceId));
+    assert.deepEqual(feed.dataSourceId, Array.from(privateDataSourceId));
   });
 
   it("Fails to create feed with zero min_signatures_threshold", async () => {
-    const feedId = "invalid-threshold-feed";
+    const jobId = "invalid-threshold-feed";
     const invalidParams = {
-      feedId: Array.from(Buffer.from(feedId.padEnd(32, "\0"))),
+      name: jobId,
+      jobId: Array.from(Buffer.from(jobId.padEnd(32, "\0"))),
       feedType: { public: {} },
       minSignaturesThreshold: 0, // Invalid: should be > 0
       frequency: new anchor.BN(300),
@@ -390,11 +409,15 @@ describe("Create Feed Instruction", () => {
       testDataSources.public.signature
     );
 
-    const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+    const [feedPDA] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("feed"),
         ctx.authority.publicKey.toBuffer(),
-        Buffer.from(feedId.padEnd(32, "\0")),
+        Buffer.from(invalidParams.name),
+        Buffer.from([0]),
+        Buffer.from([invalidParams.minSignaturesThreshold]),
+        invalidParams.frequency.toBuffer("le", 8),
+        Buffer.from(invalidParams.jobId),
       ],
       ctx.molphaProgram.programId
     );
@@ -403,7 +426,7 @@ describe("Create Feed Instruction", () => {
       await ctx.molphaProgram.methods
         .createFeed(invalidParams, dataSourceInfo)
         .accounts({
-          feedAccount: feedAccountPDA,
+          feed: feedPDA,
           dataSource: publicDataSourcePDA,
           ethLinkPda: null,
           authority: ctx.authority.publicKey,
@@ -420,9 +443,10 @@ describe("Create Feed Instruction", () => {
   });
 
   it("Fails to create feed with empty IPFS CID", async () => {
-    const feedId = "invalid-cid-feed";
+    const jobId = "invalid-cid-feed";
     const invalidParams = {
-      feedId: Array.from(Buffer.from(feedId.padEnd(32, "\0"))),
+      name: jobId,
+      jobId: Array.from(Buffer.from(jobId.padEnd(32, "\0"))),
       feedType: { public: {} },
       minSignaturesThreshold: 2,
       frequency: new anchor.BN(300),
@@ -438,11 +462,15 @@ describe("Create Feed Instruction", () => {
       testDataSources.public.signature
     );
 
-    const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+    const [feedPDA] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("feed"),
         ctx.authority.publicKey.toBuffer(),
-        Buffer.from(feedId.padEnd(32, "\0")),
+        Buffer.from(invalidParams.name),
+        Buffer.from([0]),
+        Buffer.from([invalidParams.minSignaturesThreshold]),
+        invalidParams.frequency.toBuffer("le", 8),
+        Buffer.from(invalidParams.jobId),
       ],
       ctx.molphaProgram.programId
     );
@@ -451,7 +479,7 @@ describe("Create Feed Instruction", () => {
       await ctx.molphaProgram.methods
         .createFeed(invalidParams, dataSourceInfo)
         .accounts({
-          feedAccount: feedAccountPDA,
+          feed: feedPDA,
           dataSource: publicDataSourcePDA,
           ethLinkPda: null,
           authority: ctx.authority.publicKey,
@@ -468,11 +496,11 @@ describe("Create Feed Instruction", () => {
   });
 
   it("Fails to create feed with mismatched data source ID", async () => {
-    const feedId = "mismatched-ds-feed";
+    const jobId = "mismatched-ds-feed";
     const wrongDataSourceId = new Uint8Array(32).fill(255); // Wrong ID
 
     const feedParams = createFeedParams(
-      feedId,
+      jobId,
       { public: {} },
       wrongDataSourceId
     );
@@ -490,11 +518,15 @@ describe("Create Feed Instruction", () => {
       ctx.molphaProgram.programId
     );
 
-    const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+    const [feedPDA] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("feed"),
         ctx.authority.publicKey.toBuffer(),
-        Buffer.from(feedId.padEnd(32, "\0")),
+        Buffer.from(feedParams.name),
+        Buffer.from([0]),
+        Buffer.from([feedParams.minSignaturesThreshold]),
+        feedParams.frequency.toBuffer("le", 8),
+        Buffer.from(feedParams.jobId),
       ],
       ctx.molphaProgram.programId
     );
@@ -503,7 +535,7 @@ describe("Create Feed Instruction", () => {
       await ctx.molphaProgram.methods
         .createFeed(feedParams, dataSourceInfo)
         .accounts({
-          feedAccount: feedAccountPDA,
+          feed: feedPDA,
           dataSource: dataSourcePDA,
           ethLinkPda: null,
           authority: ctx.authority.publicKey,
@@ -517,9 +549,9 @@ describe("Create Feed Instruction", () => {
   });
 
   it("Fails to create private feed without EthLink when required", async () => {
-    const feedId = "private-no-link-feed";
+    const jobId = "private-no-link-feed";
     const feedParams = createFeedParams(
-      feedId,
+      jobId,
       { personal: {} },
       privateDataSourceId
     );
@@ -532,11 +564,15 @@ describe("Create Feed Instruction", () => {
       testDataSources.private.signature
     );
 
-    const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+    const [feedPDA] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("feed"),
         ctx.authority.publicKey.toBuffer(),
-        Buffer.from(feedId.padEnd(32, "\0")),
+        Buffer.from(feedParams.name),
+        Buffer.from([1]),
+        Buffer.from([feedParams.minSignaturesThreshold]),
+        feedParams.frequency.toBuffer("le", 8),
+        Buffer.from(feedParams.jobId),
       ],
       ctx.molphaProgram.programId
     );
@@ -545,7 +581,7 @@ describe("Create Feed Instruction", () => {
       await ctx.molphaProgram.methods
         .createFeed(feedParams, dataSourceInfo)
         .accounts({
-          feedAccount: feedAccountPDA,
+          feed: feedPDA,
           dataSource: privateDataSourcePDA,
           ethLinkPda: null, // Missing EthLink for private data source
           authority: ctx.authority.publicKey,
@@ -562,9 +598,9 @@ describe("Create Feed Instruction", () => {
   });
 
   it("Fails to create duplicate feed", async () => {
-    const feedId = "public-btc-feed"; // Same as first test
+    const jobId = "public-btc-feed"; // Same as first test
     const feedParams = createFeedParams(
-      feedId,
+      jobId,
       { public: {} },
       publicDataSourceId
     );
@@ -577,11 +613,15 @@ describe("Create Feed Instruction", () => {
       testDataSources.public.signature
     );
 
-    const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+    const [feedPDA] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("feed"),
         ctx.authority.publicKey.toBuffer(),
-        Buffer.from(feedId.padEnd(32, "\0")),
+        Buffer.from(feedParams.name),
+        Buffer.from([0]),
+        Buffer.from([feedParams.minSignaturesThreshold]),
+        feedParams.frequency.toBuffer("le", 8),
+        Buffer.from(feedParams.jobId),
       ],
       ctx.molphaProgram.programId
     );
@@ -590,7 +630,7 @@ describe("Create Feed Instruction", () => {
       await ctx.molphaProgram.methods
         .createFeed(feedParams, dataSourceInfo)
         .accounts({
-          feedAccount: feedAccountPDA,
+          feed: feedPDA,
           dataSource: publicDataSourcePDA,
           ethLinkPda: null,
           authority: ctx.authority.publicKey,
@@ -607,7 +647,7 @@ describe("Create Feed Instruction", () => {
   });
 
   it("Fails to create feed with invalid data source signature", async () => {
-    const feedId = "invalid-sig-feed";
+    const jobId = "invalid-sig-feed";
 
     // Use wrong data for signature verification
     const invalidDataSourceInfo = createTestDataSourceInfo(
@@ -626,7 +666,7 @@ describe("Create Feed Instruction", () => {
     });
 
     const feedParams = createFeedParams(
-      feedId,
+      jobId,
       { public: {} },
       dataSourceId
     );
@@ -636,11 +676,15 @@ describe("Create Feed Instruction", () => {
       ctx.molphaProgram.programId
     );
 
-    const [feedAccountPDA] = PublicKey.findProgramAddressSync(
+    const [feedPDA] = PublicKey.findProgramAddressSync(
       [
         Buffer.from("feed"),
         ctx.authority.publicKey.toBuffer(),
-        Buffer.from(feedId.padEnd(32, "\0")),
+        Buffer.from(feedParams.name),
+        Buffer.from([0]),
+        Buffer.from([feedParams.minSignaturesThreshold]),
+        feedParams.frequency.toBuffer("le", 8),
+        Buffer.from(feedParams.jobId),
       ],
       ctx.molphaProgram.programId
     );
@@ -649,7 +693,7 @@ describe("Create Feed Instruction", () => {
       await ctx.molphaProgram.methods
         .createFeed(feedParams, invalidDataSourceInfo)
         .accounts({
-          feedAccount: feedAccountPDA,
+          feed: feedPDA,
           dataSource: dataSourcePDA,
           ethLinkPda: null,
           authority: ctx.authority.publicKey,

@@ -28,19 +28,14 @@ pub mod molpha {
         instructions::remove_node(ctx, node_pubkey)
     }
 
-    pub fn verify_signatures(
-        ctx: Context<VerifySignatures>,
-        message: Vec<u8>,
-        min_signatures_threshold: u8,
-        answer: state::Answer,
-    ) -> Result<()> {
-        instructions::verify_signatures(
-            ctx,
-            message,
-            min_signatures_threshold,
-            answer,
-        )
-    }
+    // pub fn verify_signatures(
+    //     ctx: Context<VerifySignatures>,
+    //     message: Vec<u8>,
+    //     min_signatures_threshold: u8,
+    //     answer: state::Answer,
+    // ) -> Result<()> {
+    //     instructions::verify_signatures(ctx, message, min_signatures_threshold, answer)
+    // }
 
     // Feed management functions (from molpha-feed)
     pub fn create_feed(
@@ -64,10 +59,6 @@ pub mod molpha {
 
     pub fn initialize_protocol(ctx: Context<InitializeProtocol>, fee: u64) -> Result<()> {
         instructions::initialize_protocol(ctx, fee)
-    }
-
-    pub fn subscribe(ctx: Context<Subscribe>) -> Result<()> {
-        instructions::subscribe(ctx)
     }
 
     pub fn top_up(ctx: Context<TopUp>, amount: u64) -> Result<()> {

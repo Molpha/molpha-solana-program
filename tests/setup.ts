@@ -122,12 +122,13 @@ export function createTestDataSourceInfo(
 
 // Helper function to create feed parameters
 export function createFeedParams(
-  feedId: string,
+  jobId: string,
   feedType: any,
   dataSourceId: Uint8Array
 ) {
   return {
-    feedId: Array.from(Buffer.from(feedId.padEnd(32, "\0"))),
+    name: jobId,
+    jobId: Array.from(Buffer.from(jobId.padEnd(32, "\0"))),
     feedType: feedType,
     minSignaturesThreshold: 2,
     frequency: new anchor.BN(300), // 5 minutes
