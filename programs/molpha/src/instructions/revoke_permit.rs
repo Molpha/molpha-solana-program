@@ -1,4 +1,5 @@
 use crate::error::DataSourceError;
+use crate::events::PermitRevoked;
 use crate::state::EthLink;
 use crate::utils::eip712;
 use anchor_lang::prelude::*;
@@ -42,6 +43,14 @@ pub fn revoke_permit(
         eth_link_account.grantee == grantee,
         DataSourceError::EthLinkNotFound
     );
+
+    // Emit event before closing
+    emit!(PermitRevoked {
+        permit: ctx.accounts.eth_link_pda.key(),
+        owner: ctx.accounts.payer.key(),
+        spender_eth: owner_eth,
+        revoked_at: Clock::get()?.unix_timestamp,
+    });
 
     // 4) Close the EthLink PDA (transfer lamports back to payer)
     // The close = payer attribute will handle this automatically

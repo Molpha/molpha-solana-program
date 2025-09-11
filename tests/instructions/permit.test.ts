@@ -1,6 +1,11 @@
 import { assert } from "chai";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
-import { setupTestContext, initializeProtocol, TestContext, generatePermitSignature } from "../setup";
+import {
+  setupTestContext,
+  initializeProtocol,
+  TestContext,
+  generatePermitSignature,
+} from "../setup";
 
 describe("Permit and Revoke Permit Instructions", () => {
   let ctx: TestContext;
@@ -16,19 +21,14 @@ describe("Permit and Revoke Permit Instructions", () => {
     // Generate a keypair and sign the permit data
     const { signature, address } = generatePermitSignature(testGrantee);
 
-    const ownerEthBytes = Array.from(
-      Buffer.from(address.slice(2), "hex")
-    );
+    const ownerEthBytes = Array.from(Buffer.from(address.slice(2), "hex"));
     // Convert base58 Solana public key to bytes
     const granteePublicKey = new PublicKey(testGrantee);
     const granteeBytes = Array.from(granteePublicKey.toBuffer());
 
     // Extract recovery ID and convert from Ethereum format (27/28) to Solana format (0/1)
     const recoveryId = parseInt(signature.slice(-2), 16) - 27;
-    const sigWithoutRecoveryId = Buffer.from(
-      signature.slice(2, -2),
-      "hex"
-    );
+    const sigWithoutRecoveryId = Buffer.from(signature.slice(2, -2), "hex");
     const sigWithSolanaRecoveryId = Buffer.concat([
       sigWithoutRecoveryId,
       Buffer.from([recoveryId]),
@@ -64,19 +64,14 @@ describe("Permit and Revoke Permit Instructions", () => {
     // Generate a keypair and sign the permit data
     const { signature, address } = generatePermitSignature(testGrantee);
 
-    const ownerEthBytes = Array.from(
-      Buffer.from(address.slice(2), "hex")
-    );
+    const ownerEthBytes = Array.from(Buffer.from(address.slice(2), "hex"));
     // Convert base58 Solana public key to bytes
     const granteePublicKey = new PublicKey(testGrantee);
     const granteeBytes = Array.from(granteePublicKey.toBuffer());
 
     // Extract recovery ID and convert from Ethereum format (27/28) to Solana format (0/1)
     const recoveryId = parseInt(signature.slice(-2), 16) - 27;
-    const sigWithoutRecoveryId = Buffer.from(
-      signature.slice(2, -2),
-      "hex"
-    );
+    const sigWithoutRecoveryId = Buffer.from(signature.slice(2, -2), "hex");
     const sigWithSolanaRecoveryId = Buffer.concat([
       sigWithoutRecoveryId,
       Buffer.from([recoveryId]),
@@ -117,7 +112,7 @@ describe("Permit and Revoke Permit Instructions", () => {
       await ctx.molphaProgram.account.ethLink.fetch(ethLinkPDA);
       assert.fail("Account should have been closed");
     } catch (error: any) {
-      assert.ok(error.message.includes("Account does not exist"));
+      assert.equal(error.message, "Could not find " + ethLinkPDA.toString());
     }
   });
 });

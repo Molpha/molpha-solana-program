@@ -1,5 +1,7 @@
 use crate::error::FeedError;
-use crate::state::{Feed, FeedType};
+use crate::events::FeedConfigUpdated;
+use crate::state::{Feed, FeedType, ProtocolConfig};
+use crate::utils::pricing::calculate_price_per_second_scaled;
 use anchor_lang::prelude::*;
 
 pub fn update_feed_config(
@@ -18,9 +20,25 @@ pub fn update_feed_config(
         FeedError::InvalidFeedConfig
     );
 
+    let old_price_per_second_scaled = feed.price_per_second_scaled;
+    let price_per_second_scaled = calculate_price_per_second_scaled(feed, &ctx.accounts.protocol_config)?;
+    let time_left = feed.subscription_due_time as u64 - Clock::get()?.unix_timestamp as u64;
+    let new_due_time = Clock::get()?.unix_timestamp as u64 + ((time_left * old_price_per_second_scaled) / price_per_second_scaled);
+
+    feed.subscription_due_time = new_due_time as i64;
+    feed.price_per_second_scaled = price_per_second_scaled;
     feed.min_signatures_threshold = params.min_signatures_threshold;
     feed.frequency = params.frequency;
-    feed.ipfs_cid = params.ipfs_cid;
+    feed.ipfs_cid = params.ipfs_cid.clone();
+    feed.job_id = params.job_id;
+
+    // Emit event
+    emit!(FeedConfigUpdated {
+        feed: ctx.accounts.feed.key(),
+        authority: ctx.accounts.authority.key(),
+        new_ipfs_cid: params.ipfs_cid,
+        updated_at: Clock::get()?.unix_timestamp,
+    });
 
     Ok(())
 }
@@ -33,6 +51,11 @@ pub struct UpdateFeedConfig<'info> {
     )]
     pub feed: Account<'info, Feed>,
     pub authority: Signer<'info>,
+    #[account(
+        seeds = [ProtocolConfig::SEED_PREFIX],
+        bump,
+    )]
+    pub protocol_config: Account<'info, ProtocolConfig>,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
@@ -40,4 +63,5 @@ pub struct UpdateFeedConfigParams {
     pub min_signatures_threshold: u8,
     pub frequency: u64,
     pub ipfs_cid: String,
+    pub job_id: [u8; 32],
 }

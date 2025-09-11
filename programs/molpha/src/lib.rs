@@ -42,8 +42,18 @@ pub mod molpha {
         ctx: Context<CreateFeed>,
         params: CreateFeedParams,
         data_source_info: DataSourceInfo,
+        subscription_duration_seconds: u64,
+        priority_fee_budget: u64,
     ) -> Result<()> {
-        instructions::create_feed(ctx, params, data_source_info)
+        instructions::create_feed(ctx, params, data_source_info, subscription_duration_seconds, priority_fee_budget)
+    }
+
+    pub fn extend_subscription(
+        ctx: Context<ExtendSubscription>,
+        additional_duration_seconds: u64,
+        additional_priority_fee_budget: u64,
+    ) -> Result<()> {
+        instructions::extend_subscription(ctx, additional_duration_seconds, additional_priority_fee_budget)
     }
 
     pub fn update_feed_config(

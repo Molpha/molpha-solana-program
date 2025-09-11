@@ -36,6 +36,14 @@ pub enum FeedError {
     NotEnoughSignatures,
     #[msg("Invalid or inaccessible data source.")]
     InvalidDataSource,
+    #[msg("Subscription has expired.")]
+    SubscriptionExpired,
+    #[msg("Minimum subscription time is 1 day.")]
+    MinimumSubscriptionTime,
+    #[msg("Minimum extension time is 1 day.")]
+    MinimumExtensionTime,
+    #[msg("Insufficient priority fee budget.")]
+    InsufficientPriorityFeeBudget,
 }
 
 #[error_code]

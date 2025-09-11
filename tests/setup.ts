@@ -2,11 +2,11 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program, BN, AnchorError, Wallet } from "@coral-xyz/anchor";
 import { Molpha } from "../target/types/molpha";
 import { ethers } from "ethers";
-import {
-  Keypair,
-  SystemProgram,
-  PublicKey,
-} from "@solana/web3.js";
+import { Keypair, SystemProgram, PublicKey } from "@solana/web3.js";
+import { BankrunProvider } from "anchor-bankrun";
+import * as toml from "toml";
+import * as fs from "fs";
+import { AddedAccount, startAnchor } from "solana-bankrun";
 
 export interface TestContext {
   molphaProgram: Program<Molpha>;
@@ -14,22 +14,109 @@ export interface TestContext {
   protocolConfigPDA: PublicKey;
   nodes: Keypair[];
   authority: anchor.Wallet;
-  provider: anchor.AnchorProvider;
+  provider: BankrunProvider;
+}
+
+function getProgramId(): PublicKey {
+  const anchorToml = toml.parse(fs.readFileSync("./Anchor.toml", "utf-8"));
+
+  return new PublicKey(anchorToml.programs.localnet.molpha);
+}
+
+export async function createAccounts() {
+  // Load wallet
+  console.log("Loading local wallet...");
+  const wallet = loadWallet().payer;
+
+  // Create Service Provider KeyPair
+  console.log("Creating Service Provider KeyPair...");
+  const user = Keypair.generate();
+
+  const newAccounts = {
+    wallet,
+    user,
+  };
+
+  const wa = Object.values(newAccounts).map((acc) => ({
+    address: acc.publicKey,
+    info: {
+      lamports: 1000_000_000_000,
+      executable: false,
+      owner: anchor.web3.SystemProgram.programId,
+      data: Buffer.alloc(0),
+    },
+  }));
+
+  // // Connection to mainnet for cloning accounts
+  // const connection = new Connection('https://api.mainnet-beta.solana.com')
+
+  // // Add Raydium config account
+  // const raydiumConfig = await connection.getAccountInfo(RAYDIUM_CONFIG)
+  // addedAccounts.push({
+  //   address: RAYDIUM_CONFIG,
+  //   info: raydiumConfig,
+  // })
+
+  // // Add Raydium pool fee receiver account
+  // const raydiumPoolFeeReceiver = await connection.getAccountInfo(
+  //   RAYDIUM_POOL_FEE_RECEIVER,
+  // )
+  // addedAccounts.push({
+  //   address: RAYDIUM_POOL_FEE_RECEIVER,
+  //   info: raydiumPoolFeeReceiver,
+  // })
+
+  return {
+    ...newAccounts,
+    addedAccounts: wa,
+  };
+}
+
+export async function getProvider() {
+  // In Bankrun, the default wallet is pre-funded with SOL
+  // We can use it directly - no need to create a new wallet
+  const wallet = loadWallet();
+
+  const newAccounts = { wallet };
+  // Set the balance of testAccount
+  const wa = Object.values(newAccounts).map((acc) => ({
+    address: acc.publicKey,
+    info: {
+      lamports: 1000_000_000_000,
+      executable: false,
+      owner: anchor.web3.SystemProgram.programId,
+      data: Buffer.alloc(0),
+    },
+  }));
+
+  const context = await startAnchor(
+    ".",
+    [
+      {
+        name: "molpha",
+        programId: new PublicKey(
+          "7MgLh8MFfPrs4Jmx9z3hTq7oapXavoZQ2UXJmy3vdozx"
+        ),
+      },
+    ],
+    wa
+  );
+  const provider = new BankrunProvider(context);
+  provider.wallet = new Wallet(wallet.payer);
+
+  return provider;
 }
 
 export function loadWallet(): anchor.Wallet {
-  const provider = anchor.AnchorProvider.env();
-  if (provider && provider.wallet) {
-    return provider.wallet as anchor.Wallet;
-  }
-  
-  // Fallback to generated keypair if provider not available
-  const testWallet = Keypair.generate();
-  return new anchor.Wallet(testWallet);
+  const walletPath = `${require("os").homedir()}/.config/solana/id.json`;
+  const secretKeyString = fs.readFileSync(walletPath, "utf8");
+  const secretKey = Uint8Array.from(JSON.parse(secretKeyString));
+  const keypair = Keypair.fromSecretKey(secretKey);
+  return new anchor.Wallet(keypair);
 }
 
 export async function setupTestContext(): Promise<TestContext> {
-  const provider = anchor.AnchorProvider.env();
+  const provider = await getProvider();
   anchor.setProvider(provider);
 
   const molphaProgram = anchor.workspace.Molpha as Program<Molpha>;
@@ -78,15 +165,19 @@ export async function initializeProtocol(ctx: TestContext): Promise<void> {
   }
 
   try {
-    // Initialize the protocol config
+    // Initialize the protocol config with new subscription parameters
     await ctx.molphaProgram.methods
-      .initializeProtocol(new anchor.BN(1000)) // 1000 lamports per update
+      .initializeProtocol(new anchor.BN(1000)) // Legacy fee_per_update
       .accounts({
         protocolConfig: ctx.protocolConfigPDA,
         authority: ctx.authority.publicKey,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
+
+    // Update protocol config with new subscription parameters
+    // Note: This would require a new instruction in the program to update these fields
+    // For now, we'll use the default values from the struct
   } catch (e) {
     // Ignore if already initialized
   }
@@ -111,8 +202,12 @@ export function createTestDataSourceInfo(
     Buffer.from([recoveryId]),
   ]);
 
+  // Use proper discriminated union format for the enum
+  const dataSourceTypeEnum =
+    dataSourceType === 1 ? { private: {} } : { public: {} };
+
   return {
-    dataSourceType: dataSourceType === 1 ? { private: {} } : { public: {} },
+    dataSourceType: dataSourceTypeEnum,
     source: source,
     ownerEth: Array.from(Buffer.from(owner.slice(2), "hex")),
     name: name,
@@ -123,17 +218,17 @@ export function createTestDataSourceInfo(
 // Helper function to create feed parameters
 export function createFeedParams(
   jobId: string,
-  feedType: any,
+  feedType: { public: {} } | { personal: {} },
   dataSourceId: Uint8Array
 ) {
   return {
     name: jobId,
+    dataSourceId: Array.from(dataSourceId),
     jobId: Array.from(Buffer.from(jobId.padEnd(32, "\0"))),
     feedType: feedType,
     minSignaturesThreshold: 2,
-    frequency: new anchor.BN(300), // 5 minutes
+    frequency: new anchor.BN(300), // 5 minutes as BN
     ipfsCid: "QmTestCID123456789",
-    dataSourceId: Array.from(dataSourceId),
   };
 }
 
@@ -213,13 +308,7 @@ export function buildEthLinkStructHash(data: any) {
 
   return Buffer.from(
     ethers
-      .keccak256(
-        Buffer.concat([
-          typeHash,
-          ownerEthPadded,
-          granteePadded,
-        ])
-      )
+      .keccak256(Buffer.concat([typeHash, ownerEthPadded, granteePadded]))
       .slice(2),
     "hex"
   );
@@ -250,7 +339,11 @@ export function computeDataSourceId(data: any) {
 }
 
 // Generate a keypair and sign data for testing
-export function generateTestSignature(dataSourceType: number, source: string, name: string) {
+export function generateTestSignature(
+  dataSourceType: number,
+  source: string,
+  name: string
+) {
   // Generate a random Ethereum-style keypair
   const wallet = ethers.Wallet.createRandom();
   const privateKey = wallet.privateKey;
@@ -258,7 +351,7 @@ export function generateTestSignature(dataSourceType: number, source: string, na
 
   // Build the EIP-712 domain separator
   const domainSeparator = buildEIP712Domain("Molpha Oracles", "1");
-  
+
   // Build the struct hash for the data source
   const structHash = buildDataSourceStructHash({
     dataSourceType,
@@ -266,21 +359,21 @@ export function generateTestSignature(dataSourceType: number, source: string, na
     owner: address,
     name,
   });
-  
+
   // Build the final digest
   const digest = buildEIP712Digest(domainSeparator, structHash);
-  
+
   // Sign the digest
   const signingKey = new ethers.SigningKey(privateKey);
   const signature = signingKey.sign(digest);
-  
+
   // Convert to the format expected by the program (r + s + v)
   const r = signature.r.slice(2); // Remove 0x prefix
   const s = signature.s.slice(2); // Remove 0x prefix
-  const v = signature.v.toString(16).padStart(2, '0'); // Convert v to hex
-  
+  const v = signature.v.toString(16).padStart(2, "0"); // Convert v to hex
+
   const fullSignature = `0x${r}${s}${v}`;
-  
+
   return {
     signature: fullSignature,
     address: address,
@@ -297,27 +390,27 @@ export function generatePermitSignature(grantee: string) {
 
   // Build the EIP-712 domain separator
   const domainSeparator = buildEIP712Domain("Molpha Oracles", "1");
-  
+
   // Build the struct hash for the permit
   const structHash = buildEthLinkStructHash({
     owner: address,
     grantee: grantee,
   });
-  
+
   // Build the final digest
   const digest = buildEIP712Digest(domainSeparator, structHash);
-  
+
   // Sign the digest
   const signingKey = new ethers.SigningKey(privateKey);
   const signature = signingKey.sign(digest);
-  
+
   // Convert to the format expected by the program (r + s + v)
   const r = signature.r.slice(2); // Remove 0x prefix
   const s = signature.s.slice(2); // Remove 0x prefix
-  const v = signature.v.toString(16).padStart(2, '0'); // Convert v to hex
-  
+  const v = signature.v.toString(16).padStart(2, "0"); // Convert v to hex
+
   const fullSignature = `0x${r}${s}${v}`;
-  
+
   return {
     signature: fullSignature,
     address: address,

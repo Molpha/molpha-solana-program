@@ -1,6 +1,14 @@
 import { assert } from "chai";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
-import { setupTestContext, initializeProtocol, TestContext, createTestDataSourceInfo, testSignature, computeDataSourceId, generateTestSignature } from "../setup";
+import {
+  setupTestContext,
+  initializeProtocol,
+  TestContext,
+  createTestDataSourceInfo,
+  testSignature,
+  computeDataSourceId,
+  generateTestSignature,
+} from "../setup";
 
 describe("Create Data Source Instruction", () => {
   let ctx: TestContext;
@@ -18,7 +26,8 @@ describe("Create Data Source Instruction", () => {
     name: "Name of Data Source",
   };
 
-  const testSig = "0x945bf2247b7bec301df7f3ac7c849f9dba872077a6fe142f06a6185fa0e51815581ee2b3ee799728ca4ad0c6386440f52346db64265560ffbd2e8f5882c943211b"
+  const testSig =
+    "0x945bf2247b7bec301df7f3ac7c849f9dba872077a6fe142f06a6185fa0e51815581ee2b3ee799728ca4ad0c6386440f52346db64265560ffbd2e8f5882c943211b";
 
   it("Successfully creates a private data source with valid EIP-712 signature", async () => {
     const dataSourceInfo = createTestDataSourceInfo(
@@ -55,7 +64,10 @@ describe("Create Data Source Instruction", () => {
     );
 
     // Verify the account was created correctly
-    assert.equal(Buffer.from(dataSourceAccount.id).toString("hex"), Buffer.from(dataSourceId).toString("hex"));
+    assert.equal(
+      Buffer.from(dataSourceAccount.id).toString("hex"),
+      Buffer.from(dataSourceId).toString("hex")
+    );
     assert.deepEqual(
       dataSourceAccount.ownerEth,
       Array.from(Buffer.from(testDataSource.owner.slice(2), "hex"))

@@ -1,3 +1,4 @@
+use crate::events::FeedToppedUp;
 use crate::state::Feed;
 use anchor_lang::prelude::*;
 
@@ -12,6 +13,15 @@ pub fn top_up(ctx: Context<TopUp>, amount: u64) -> Result<()> {
     anchor_lang::system_program::transfer(cpi_context, amount)?;
 
     ctx.accounts.feed.balance += amount;
+
+    // Emit event
+    emit!(FeedToppedUp {
+        feed: ctx.accounts.feed.key(),
+        authority: ctx.accounts.authority.key(),
+        amount,
+        new_balance: ctx.accounts.feed.balance,
+        topped_up_at: Clock::get()?.unix_timestamp,
+    });
 
     Ok(())
 }

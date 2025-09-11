@@ -1,14 +1,21 @@
 use crate::error::FeedError;
+use crate::events::AnswerPublished;
 use crate::state::{
-    feed, Answer, Feed, FeedType, NodeRegistry, ProtocolConfig, MAX_HISTORY
+    Answer, Feed, NodeRegistry, MAX_HISTORY
 };
-use crate::utils::parse_ed25519_instruction;
+use crate::utils::{parse_ed25519_instruction, pricing::*};
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{ed25519_program, sysvar};
 
 pub fn publish_answer(ctx: Context<PublishAnswer>, answer: Answer) -> Result<()> {
     let feed = &mut ctx.accounts.feed;
     let clock = Clock::get()?;
+
+    // Check if subscription is active
+    require!(
+        feed.is_subscription_active(clock.unix_timestamp),
+        FeedError::SubscriptionExpired
+    );
 
     require!(
         answer.timestamp > feed.latest_answer.timestamp,
@@ -17,6 +24,23 @@ pub fn publish_answer(ctx: Context<PublishAnswer>, answer: Answer) -> Result<()>
     require!(
         answer.timestamp <= clock.unix_timestamp,
         FeedError::FutureTimestamp
+    );
+
+    // Calculate actual priority fee paid
+    let estimated_compute_units = estimate_compute_units(
+        ctx.accounts.node_registry.nodes.len() as u32,
+        feed.answer_history.len() as u32,
+    );
+    
+    let priority_fee = calculate_priority_fee_from_instructions(
+        &ctx.accounts.instructions,
+        estimated_compute_units,
+    )?;
+
+    // Check priority fee budgetAS
+    require!(
+        feed.has_priority_fee_budget(priority_fee),
+        FeedError::InsufficientPriorityFeeBudget
     );
 
     // Validate signatures from registered nodes
@@ -48,14 +72,18 @@ pub fn publish_answer(ctx: Context<PublishAnswer>, answer: Answer) -> Result<()>
         FeedError::NotEnoughSignatures
     );
 
-    let config = &ctx.accounts.protocol_config;
+    // Calculate base fee using EVM-style pricing
+    // let base_fee_per_update = (feed.price_per_second_scaled * feed.frequency) / ProtocolConfig::SCALAR;
+    // let total_cost = base_fee_per_update + priority_fee;
 
-    // Check balance and deduct fee
+    // Deduct from feed balance
     require!(
-        feed.balance >= config.fee_per_update,
+        feed.balance >= priority_fee,
         FeedError::InsufficientBalance
     );
-    feed.balance -= config.fee_per_update;
+    
+    feed.balance -= priority_fee;
+    feed.consumed_priority_fees += priority_fee;
 
     feed.latest_answer = answer;
 
@@ -70,21 +98,46 @@ pub fn publish_answer(ctx: Context<PublishAnswer>, answer: Answer) -> Result<()>
     }
 
     msg!(
-        "Successfully published answer with {} valid signatures.",
-        unique_valid_signers.len()
+        "Successfully published answer with {} valid signatures. Priority fee: {}",
+        unique_valid_signers.len(),
+        priority_fee
     );
+
+    // Emit event
+    emit!(AnswerPublished {
+        feed: ctx.accounts.feed.key(),
+        answer,
+        signatures_count: unique_valid_signers.len() as u8,
+        published_at: clock.unix_timestamp,
+    });
 
     Ok(())
 }
 
 #[derive(Accounts)]
 pub struct PublishAnswer<'info> {
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = feed.is_subscription_active(Clock::get()?.unix_timestamp) @ FeedError::SubscriptionExpired,
+        seeds = [
+            Feed::SEED_PREFIX, 
+            feed.authority.as_ref(), 
+            feed.name.as_bytes().as_ref(), 
+            feed.feed_type.to_seed().as_ref(), 
+            feed.min_signatures_threshold.to_le_bytes().as_ref(), 
+            feed.frequency.to_le_bytes().as_ref(), 
+            feed.job_id.as_ref()
+        ],
+        bump = feed.bump
+    )]
     pub feed: Account<'info, Feed>,
 
+    #[account(
+        mut,
+        seeds = [NodeRegistry::SEED_PREFIX],
+        bump
+    )]
     pub node_registry: Account<'info, NodeRegistry>,
-
-    pub protocol_config: Account<'info, ProtocolConfig>,
 
     /// CHECK: This is safe. We only read the instructions sysvar for validation.
     #[account(address = sysvar::instructions::ID)]

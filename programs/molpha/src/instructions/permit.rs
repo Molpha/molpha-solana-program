@@ -1,4 +1,5 @@
 use crate::error::DataSourceError;
+use crate::events::PermitCreated;
 use crate::state::EthLink;
 use crate::utils::eip712;
 use anchor_lang::prelude::*;
@@ -39,6 +40,16 @@ pub fn permit(
     eth_link_account.grantee = grantee;
     eth_link_account.created_at = clock.unix_timestamp;
     eth_link_account.bump = ctx.bumps.eth_link_pda;
+
+    // Emit event
+    emit!(PermitCreated {
+        permit: ctx.accounts.eth_link_pda.key(),
+        owner: ctx.accounts.payer.key(),
+        spender_eth: owner_eth,
+        deadline: 0, // No deadline in this implementation
+        nonce: 0, // No nonce in this implementation
+        created_at: clock.unix_timestamp,
+    });
 
     Ok(())
 }

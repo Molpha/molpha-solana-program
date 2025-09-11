@@ -5,6 +5,7 @@ use anchor_lang::solana_program;
 
 pub mod eip712;
 pub mod secp;
+pub mod pricing;
 
 /// Verifies a data source signature and recovers the Ethereum address
 /// This function extracts the common logic from create_data_source for reuse
