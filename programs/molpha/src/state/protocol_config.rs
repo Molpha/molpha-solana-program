@@ -15,9 +15,6 @@ pub struct ProtocolConfig {
     pub priority_fee_buffer_percentage: u16, // Buffer for priority fees (e.g., 150 = 50% buffer)
     pub max_priority_fee_coverage: u64,      // Maximum priority fee to cover per transaction
     pub priority_fee_smoothing_window: u8,   // Number of recent transactions to average
-    
-    // Legacy field for backward compatibility
-    pub fee_per_update: u64,
     pub bump: u8,
 }
 

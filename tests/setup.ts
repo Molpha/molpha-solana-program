@@ -151,33 +151,16 @@ export async function setupTestContext(): Promise<TestContext> {
 
 export async function initializeProtocol(ctx: TestContext): Promise<void> {
   try {
-    // Initialize the node registry
+    // Initialize both node registry and protocol config in a single call
     await ctx.molphaProgram.methods
-      .initialize()
+      .initialize() // Legacy fee_per_update
       .accounts({
         nodeRegistry: ctx.nodeRegistryPDA,
-        authority: ctx.authority.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc();
-  } catch (e) {
-    // Ignore if already initialized
-  }
-
-  try {
-    // Initialize the protocol config with new subscription parameters
-    await ctx.molphaProgram.methods
-      .initializeProtocol(new anchor.BN(1000)) // Legacy fee_per_update
-      .accounts({
         protocolConfig: ctx.protocolConfigPDA,
         authority: ctx.authority.publicKey,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
-
-    // Update protocol config with new subscription parameters
-    // Note: This would require a new instruction in the program to update these fields
-    // For now, we'll use the default values from the struct
   } catch (e) {
     // Ignore if already initialized
   }

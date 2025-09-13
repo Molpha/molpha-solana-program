@@ -47,6 +47,94 @@ This directory contains scripts to deploy, initialize, and configure the Molpha 
 - Tests oracle data publication to personal feeds
 - Uses multiple test nodes to verify multi-signature support
 
+### Node Management Scripts
+
+#### `add-node.js`
+**Single node management script:**
+- Adds a single node to the node registry
+- Includes validation and error handling
+- Provides detailed feedback and verification
+
+#### `manage-nodes.js`
+**Comprehensive node management script:**
+- Add single or multiple nodes
+- Remove nodes from registry
+- List all registered nodes with details
+- Get status of specific nodes
+- Generate test keypairs
+- Batch operations from JSON files
+
+#### `nodes` (Shell wrapper)
+**Convenient shell wrapper for node management:**
+- Provides colored output and error handling
+- Easy-to-use command-line interface
+- Automatically locates and runs manage-nodes.js
+
+### Protocol Initialization and Node Management
+
+#### Quick Start
+```bash
+# 1. Initialize the protocol (required first step)
+./scripts/nodes init 1000
+
+# 2. Check protocol status
+./scripts/nodes check
+
+# 3. Add nodes to the registry
+./scripts/nodes add 11111111111111111111111111111112
+
+# 4. List all registered nodes
+./scripts/nodes list
+```
+
+#### Initialization Commands
+
+```bash
+# Initialize protocol with default fee (1000 lamports)
+./scripts/nodes init
+
+# Initialize protocol with custom fee
+./scripts/nodes init 2000
+
+# Check if protocol is initialized and view status
+./scripts/nodes check
+```
+
+#### Node Management Commands
+
+```bash
+# Add a single node
+./scripts/nodes add 11111111111111111111111111111112
+
+# List all nodes
+./scripts/nodes list
+
+# Get node status
+./scripts/nodes status 11111111111111111111111111111112
+
+# Generate test keypairs
+./scripts/nodes generate-keypairs 5
+
+# Batch add nodes from file
+./scripts/nodes batch-add sample-nodes.json
+
+# Remove a node
+./scripts/nodes remove 11111111111111111111111111111112
+```
+
+#### Environment Setup
+
+The scripts automatically handle environment variables, but you can also set them manually:
+
+```bash
+# Set environment variables (optional)
+export ANCHOR_PROVIDER_URL="http://127.0.0.1:8899"
+export ANCHOR_WALLET="$HOME/.config/solana/id.json"
+
+# Then run commands
+./scripts/nodes init
+```
+
 ## Generated Scripts
 
 After running `setup-local-env.sh`, these scripts will be created in the project root:

@@ -72,10 +72,6 @@ pub fn publish_answer(ctx: Context<PublishAnswer>, answer: Answer) -> Result<()>
         FeedError::NotEnoughSignatures
     );
 
-    // Calculate base fee using EVM-style pricing
-    // let base_fee_per_update = (feed.price_per_second_scaled * feed.frequency) / ProtocolConfig::SCALAR;
-    // let total_cost = base_fee_per_update + priority_fee;
-
     // Deduct from feed balance
     require!(
         feed.balance >= priority_fee,

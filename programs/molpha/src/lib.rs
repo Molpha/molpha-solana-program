@@ -15,7 +15,7 @@ declare_id!("7MgLh8MFfPrs4Jmx9z3hTq7oapXavoZQ2UXJmy3vdozx");
 pub mod molpha {
     use super::*;
 
-    // Node registry functions (from molpha-solana)
+    // Node registry and protocol initialization
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
         instructions::initialize(ctx)
     }
@@ -67,9 +67,6 @@ pub mod molpha {
         instructions::publish_answer(ctx, answer)
     }
 
-    pub fn initialize_protocol(ctx: Context<InitializeProtocol>, fee: u64) -> Result<()> {
-        instructions::initialize_protocol(ctx, fee)
-    }
 
     pub fn top_up(ctx: Context<TopUp>, amount: u64) -> Result<()> {
         instructions::top_up(ctx, amount)

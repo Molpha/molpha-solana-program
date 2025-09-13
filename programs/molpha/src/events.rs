@@ -81,8 +81,6 @@ pub struct PermitRevoked {
 pub struct ProtocolInitialized {
     pub protocol_config: Pubkey,
     pub authority: Pubkey,
-    pub base_fee: u64,
-    pub fee_multiplier: u64,
     pub initialized_at: i64,
 }
 
