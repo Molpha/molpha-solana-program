@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "programs/molpha",
+    "programs/faucet",
 ]
 exclude = [
     "programs/molpha-solana",

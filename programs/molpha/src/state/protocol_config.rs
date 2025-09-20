@@ -1,9 +1,10 @@
 use anchor_lang::prelude::*;
 
 #[account]
-#[derive(Default)]
+#[derive(Default, InitSpace)]
 pub struct ProtocolConfig {
     pub authority: Pubkey,
+    pub underlying_token: Pubkey,            // SPL token mint for subscription payments
     
     // EVM-style pricing parameters (from PricingHelper.sol)
     pub base_price_per_second_scaled: u64,  // Base price per second * SCALAR
@@ -20,6 +21,6 @@ pub struct ProtocolConfig {
 
 impl ProtocolConfig {
     pub const SEED_PREFIX: &'static [u8] = b"config";
-    pub const SPACE: usize = 8 + 32 + 8 + 8 + 8 + 8 + 2 + 8 + 1 + 8 + 1;
+    pub const SPACE: usize = 8 + Self::INIT_SPACE;
     pub const SCALAR: u64 = 1_000_000; // Same as EVM version
 }

@@ -1,14 +1,16 @@
 import * as anchor from "@coral-xyz/anchor";
 import { assert } from "chai";
 import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import nacl from "tweetnacl";
-import { ethers } from "ethers";
 import { BankrunProvider } from "anchor-bankrun";
 import {
   setupTestContext,
   initializeProtocol,
   TestContext,
-  generateTestSignature,
+  getDataSourcePda,
+  createTestDataSourceInfo,
+  createFeedParams,
 } from "../setup";
 
 async function safePastOnchainTimestamp(
@@ -51,44 +53,19 @@ describe("Publish Answer Instruction", () => {
       }
     }
 
-    // Generate test data source
-    const { signature, address } = generateTestSignature(
-      0, // Public data source
-      "https://api.example.com/price",
-      "Test Price Feed"
-    );
-
     const dataSourceInfo = {
       dataSourceType: { public: {} },
       source: "https://api.example.com/price",
-      ownerEth: Array.from(Buffer.from(address.slice(2), "hex")),
+      owner: ctx.authority.publicKey,
       name: "Test Price Feed",
-      sig: Array.from(
-        Buffer.concat([
-          Buffer.from(signature.slice(2, -2), "hex"),
-          Buffer.from([parseInt(signature.slice(-2), 16) - 27]),
-        ])
-      ),
     };
 
-    // Compute data source ID using the same method as setup
-    const dataSourceId = Buffer.from(
-      ethers
-        .keccak256(
-          Buffer.concat([
-            Buffer.from([0]), // dataSourceType: public = 0
-            Buffer.from("https://api.example.com/price"),
-            Buffer.from(address.slice(2), "hex"),
-            Buffer.from("Test Price Feed"),
-          ])
-        )
-        .slice(2),
-      "hex"
-    );
 
-    [dataSourcePDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("data_source"), dataSourceId],
-      ctx.molphaProgram.programId
+    [dataSourcePDA] = getDataSourcePda(
+      ctx.molphaProgram.programId,
+      ctx.authority.publicKey,
+      dataSourceInfo.name,
+      dataSourceInfo.dataSourceType
     );
 
     // Create data source
@@ -97,7 +74,7 @@ describe("Publish Answer Instruction", () => {
         .createDataSource(dataSourceInfo)
         .accountsPartial({
           dataSource: dataSourcePDA,
-          payer: ctx.authority.publicKey,
+          authority: ctx.authority.publicKey,
         })
         .rpc();
     } catch (e) {
@@ -111,7 +88,6 @@ describe("Publish Answer Instruction", () => {
       minSignaturesThreshold: 2,
       frequency: new anchor.BN(300),
       ipfsCid: "QmTestPublic",
-      dataSourceId: Array.from(dataSourceId),
       name: publicFeedId,
     };
 
@@ -132,7 +108,6 @@ describe("Publish Answer Instruction", () => {
       await ctx.molphaProgram.methods
         .createFeed(
           publicFeedParams,
-          dataSourceInfo,
           new anchor.BN(86400),
           new anchor.BN(1000)
         )
@@ -140,6 +115,13 @@ describe("Publish Answer Instruction", () => {
           feed: publicFeedPDA,
           dataSource: dataSourcePDA,
           authority: ctx.authority.publicKey,
+          protocolConfig: ctx.protocolConfigPDA,
+          userTokenAccount: ctx.userTokenAccount,
+          programTokenAccount: ctx.programTokenAccount,
+          underlyingToken: ctx.underlyingTokenMint,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .rpc();
     } catch (e) {
@@ -153,7 +135,6 @@ describe("Publish Answer Instruction", () => {
       minSignaturesThreshold: 2,
       frequency: new anchor.BN(300),
       ipfsCid: "QmTestPersonal",
-      dataSourceId: Array.from(dataSourceId),
       name: personalFeedId,
     };
 
@@ -174,7 +155,6 @@ describe("Publish Answer Instruction", () => {
       await ctx.molphaProgram.methods
         .createFeed(
           personalFeedParams,
-          dataSourceInfo,
           new anchor.BN(86400),
           new anchor.BN(1000)
         )
@@ -182,6 +162,13 @@ describe("Publish Answer Instruction", () => {
           feed: personalFeedPDA,
           dataSource: dataSourcePDA,
           authority: ctx.authority.publicKey,
+          protocolConfig: ctx.protocolConfigPDA,
+          userTokenAccount: ctx.userTokenAccount,
+          programTokenAccount: ctx.programTokenAccount,
+          underlyingToken: ctx.underlyingTokenMint,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .rpc();
     } catch (e) {
@@ -243,7 +230,7 @@ describe("Publish Answer Instruction", () => {
       // Build + send via Anchor (ensures correct accounts/ordering/provider)
       await ctx.molphaProgram.methods
         .publishAnswer(answer)
-        .accounts({
+        .accountsPartial({
           feed: publicFeedPDA,
           nodeRegistry: ctx.nodeRegistryPDA,
           instructions: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
@@ -299,7 +286,7 @@ describe("Publish Answer Instruction", () => {
       // Build + send via Anchor (ensures correct accounts/ordering/provider)
       await ctx.molphaProgram.methods
         .publishAnswer(answer)
-        .accounts({
+        .accountsPartial({
           feed: personalFeedPDA,
           nodeRegistry: ctx.nodeRegistryPDA,
           instructions: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
@@ -345,7 +332,7 @@ describe("Publish Answer Instruction", () => {
       try {
         await ctx.molphaProgram.methods
           .publishAnswer(answer)
-          .accounts({
+          .accountsPartial({
             feed: personalFeedPDA,
             nodeRegistry: ctx.nodeRegistryPDA,
             instructions: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
@@ -409,7 +396,7 @@ describe("Publish Answer Instruction", () => {
         // Build + send via Anchor (ensures correct accounts/ordering/provider)
         await ctx.molphaProgram.methods
           .publishAnswer(answer)
-          .accounts({
+          .accountsPartial({
             feed: personalFeedPDA,
             nodeRegistry: ctx.nodeRegistryPDA,
             instructions: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
@@ -458,7 +445,7 @@ describe("Publish Answer Instruction", () => {
       try {
         await ctx.molphaProgram.methods
           .publishAnswer(answer)
-          .accounts({
+          .accountsPartial({
             feed: publicFeedPDA,
             nodeRegistry: ctx.nodeRegistryPDA,
             instructions: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
@@ -586,128 +573,6 @@ describe("Publish Answer Instruction", () => {
     });
   });
 
-  describe("Feed Balance and Fees", () => {
-    it("Fails when personal feed has insufficient balance", async () => {
-      // First, drain the feed balance
-      const feed = await ctx.molphaProgram.account.feed.fetch(personalFeedPDA);
-      const protocolConfig =
-        await ctx.molphaProgram.account.protocolConfig.fetch(
-          ctx.protocolConfigPDA
-        );
-
-      // If balance is still sufficient, we need to publish enough answers to drain it
-      let currentBalance = feed.balance;
-      let drainCounter = 0;
-      let lastTimestamp = feed.latestAnswer.timestamp;
-
-      while (currentBalance.gte(protocolConfig.feePerUpdate)) {
-        const answer = {
-          value: Array.from(
-            Buffer.from(
-              `800000000000000000000000000000000000000000000000000000000000000${drainCounter.toString(
-                16
-              )}`,
-              "hex"
-            )
-          ),
-          timestamp: lastTimestamp.add(new anchor.BN(1)), // Increment timestamp
-        };
-        lastTimestamp = answer.timestamp;
-
-        // The message must be the answer value for signature verification
-        const message = Buffer.from(answer.value);
-
-        const transaction = new Transaction();
-        const signers = [ctx.nodes[0], ctx.nodes[1]];
-
-        for (const signer of signers) {
-          const signature = nacl.sign.detached(message, signer.secretKey);
-          const ix = anchor.web3.Ed25519Program.createInstructionWithPublicKey({
-            publicKey: signer.publicKey.toBytes(),
-            message,
-            signature,
-          });
-          transaction.add(ix);
-        }
-
-        transaction.add(
-          await ctx.molphaProgram.methods
-            .publishAnswer(answer)
-            .accountsPartial({
-              feed: personalFeedPDA,
-              nodeRegistry: ctx.nodeRegistryPDA,
-              protocolConfig: ctx.protocolConfigPDA,
-              instructions: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
-            })
-            .instruction()
-        );
-
-        try {
-          await ctx.provider.sendAndConfirm(transaction, [ctx.authority.payer]);
-          const newFeed = await ctx.molphaProgram.account.feed.fetch(
-            personalFeedPDA
-          );
-          currentBalance = newFeed.balance;
-          drainCounter++;
-
-          // Add small delay to ensure timestamp progression
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        } catch (e) {
-          break;
-        }
-      }
-
-      // Now try to publish with insufficient balance
-      const answer = {
-        value: Array.from(
-          Buffer.from(
-            "9000000000000000000000000000000000000000000000000000000000000000",
-            "hex"
-          )
-        ),
-        timestamp: new anchor.BN(Math.floor(Date.now() / 1000) - 1), // 1 second ago
-      };
-
-      // The message must be the answer value for signature verification
-      const message = Buffer.from(answer.value);
-
-      const transaction = new Transaction();
-      const signers = [ctx.nodes[0], ctx.nodes[1]];
-
-      for (const signer of signers) {
-        const signature = nacl.sign.detached(message, signer.secretKey);
-        const ix = anchor.web3.Ed25519Program.createInstructionWithPublicKey({
-          publicKey: signer.publicKey.toBytes(),
-          message,
-          signature,
-        });
-        transaction.add(ix);
-      }
-
-      transaction.add(
-        await ctx.molphaProgram.methods
-          .publishAnswer(answer)
-          .accountsPartial({
-            feed: personalFeedPDA,
-            nodeRegistry: ctx.nodeRegistryPDA,
-            protocolConfig: ctx.protocolConfigPDA,
-            instructions: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
-          })
-          .instruction()
-      );
-
-      try {
-        await ctx.provider.sendAndConfirm(transaction, [ctx.authority.payer]);
-        assert.fail("Should have failed with insufficient balance");
-      } catch (error: any) {
-        assert.ok(
-          error.message.includes("InsufficientBalance") ||
-            error.message.includes("custom program error")
-        );
-      }
-    });
-  });
-
   describe("Answer History Management", () => {
     it("Maintains answer history with ring buffer", async () => {
       // Create a new feed for history testing
@@ -719,7 +584,6 @@ describe("Publish Answer Instruction", () => {
         minSignaturesThreshold: 2,
         frequency: new anchor.BN(300),
         ipfsCid: "QmHistoryTest",
-        dataSourceId: Array.from(Buffer.alloc(32)), // Will be set later
         name: historyFeedName,
       };
 
@@ -736,60 +600,30 @@ describe("Publish Answer Instruction", () => {
         ctx.molphaProgram.programId
       );
 
-      // Generate test data source for history feed
-      const { signature, address } = generateTestSignature(
+      const dataSourceInfo = createTestDataSourceInfo(
         0,
         "https://api.history.com/price",
         "History Test Feed"
       );
 
-      const dataSourceInfo = {
-        dataSourceType: { public: {} },
-        source: "https://api.history.com/price",
-        ownerEth: Array.from(Buffer.from(address.slice(2), "hex")),
-        name: "History Test Feed",
-        sig: Array.from(
-          Buffer.concat([
-            Buffer.from(signature.slice(2, -2), "hex"),
-            Buffer.from([parseInt(signature.slice(-2), 16) - 27]),
-          ])
-        ),
-      };
-
-      const dataSourceId = Buffer.from(
-        ethers
-          .keccak256(
-            Buffer.concat([
-              Buffer.from([0]),
-              Buffer.from("https://api.history.com/price"),
-              Buffer.from(address.slice(2), "hex"),
-              Buffer.from("History Test Feed"),
-            ])
-          )
-          .slice(2),
-        "hex"
+      const [historyDataSourcePDA] = getDataSourcePda(
+        ctx.molphaProgram.programId,
+        ctx.authority.publicKey,
+        dataSourceInfo.name,
+        dataSourceInfo.dataSourceType
       );
-
-      const [historyDataSourcePDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from("data_source"), dataSourceId],
-        ctx.molphaProgram.programId
-      );
-
-      // Update the feed params with the correct data source ID
-      historyFeedParams.dataSourceId = Array.from(dataSourceId);
 
       await ctx.molphaProgram.methods
-        .createDataSource(dataSourceInfo)
+        .createDataSource(dataSourceInfo as any)
         .accountsPartial({
           dataSource: historyDataSourcePDA,
-          payer: ctx.authority.publicKey,
+          authority: ctx.authority.publicKey,
         })
         .rpc();
 
       await ctx.molphaProgram.methods
         .createFeed(
           historyFeedParams,
-          dataSourceInfo,
           new anchor.BN(86400),
           new anchor.BN(1000)
         )
@@ -798,6 +632,12 @@ describe("Publish Answer Instruction", () => {
           dataSource: historyDataSourcePDA,
           authority: ctx.authority.publicKey,
           protocolConfig: ctx.protocolConfigPDA,
+          userTokenAccount: ctx.userTokenAccount,
+          programTokenAccount: ctx.programTokenAccount,
+          underlyingToken: ctx.underlyingTokenMint,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .rpc();
 
@@ -840,7 +680,7 @@ describe("Publish Answer Instruction", () => {
         // Use the same pattern as working tests
         await ctx.molphaProgram.methods
           .publishAnswer(answer)
-          .accounts({
+          .accountsPartial({
             feed: historyFeedPDA,
             nodeRegistry: ctx.nodeRegistryPDA,
             instructions: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,

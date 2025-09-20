@@ -48,22 +48,10 @@ pub enum FeedError {
 
 #[error_code]
 pub enum DataSourceError {
-    #[msg("Invalid secp256k1 instruction format.")]
-    InvalidSecp256k1Instruction,
-    #[msg("The digest in the secp256k1 instruction does not match the expected digest.")]
-    DigestMismatch,
-    #[msg("The recovered Ethereum address does not match the owner address.")]
-    InvalidEthereumAddress,
     #[msg("Data source with this ID already exists.")]
     DataSourceAlreadyExists,
     #[msg("Invalid data source data format.")]
     InvalidDataSourceData,
-    #[msg("The recovered address does not match the expected address.")]
-    RecoveredAddressMismatch,
-    #[msg("The recovered address does not match the owner address for permit.")]
-    PermitRecoveredAddressMismatch,
-    #[msg("EthLink already exists.")]
-    EthLinkAlreadyExists,
-    #[msg("EthLink not found.")]
-    EthLinkNotFound,
+    #[msg("Invalid data source type.")]
+    InvalidDataSourceType,
 }

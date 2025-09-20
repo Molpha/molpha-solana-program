@@ -1,13 +1,13 @@
 import * as anchor from "@coral-xyz/anchor";
 import { assert } from "chai";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
   setupTestContext,
   initializeProtocol,
   TestContext,
   createTestDataSourceInfo,
-  generateTestSignature,
-  computeDataSourceId,
+  getDataSourcePda,
   createFeedParams,
 } from "../setup";
 import { Clock } from "solana-bankrun";
@@ -25,57 +25,37 @@ describe("Extend Subscription Instruction", () => {
     dataSourceType: number;
     source: string;
     name: string;
-    address: string;
-    signature: string;
   };
 
-  let dataSourceId: Uint8Array;
   let dataSourcePDA: PublicKey;
   let feedPDA: PublicKey;
 
   before(async () => {
-    // Generate test data source with signature
-    const sigData = generateTestSignature(
-      0, // Public
-      "https://api.coinbase.com/v2/prices/BTC-USD/spot",
-      "Bitcoin Price Feed"
-    );
-
     testDataSource = {
       dataSourceType: 0,
       source: "https://api.coinbase.com/v2/prices/BTC-USD/spot",
       name: "Bitcoin Price Feed",
-      address: sigData.address,
-      signature: sigData.signature,
     };
 
     // Create test data source for feed creation
     const dataSourceInfo = createTestDataSourceInfo(
       testDataSource.dataSourceType,
       testDataSource.source,
-      testDataSource.address,
       testDataSource.name,
-      testDataSource.signature
     );
 
-    dataSourceId = computeDataSourceId({
-      dataSourceType: testDataSource.dataSourceType,
-      ownerEth: testDataSource.address,
-      name: testDataSource.name,
-      source: testDataSource.source,
-    });
-
-    [dataSourcePDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("data_source"), dataSourceId],
-      ctx.molphaProgram.programId
+    [dataSourcePDA] = getDataSourcePda(
+      ctx.molphaProgram.programId,
+      ctx.authority.publicKey,
+      testDataSource.name,
+      testDataSource.dataSourceType
     );
-
     // Create the data source
     try {
       await ctx.molphaProgram.methods
-        .createDataSource(dataSourceInfo)
-        .accounts({
-          payer: ctx.authority.publicKey,
+        .createDataSource(dataSourceInfo as any)
+        .accountsPartial({
+          authority: ctx.authority.publicKey,
           dataSource: dataSourcePDA,
           systemProgram: SystemProgram.programId,
         })
@@ -86,7 +66,7 @@ describe("Extend Subscription Instruction", () => {
 
     // Create a feed with initial subscription
     const jobId = "btc-feed-subscription-test";
-    const feedParams = createFeedParams(jobId, { public: {} }, dataSourceId);
+    const feedParams = createFeedParams(jobId, { public: {} });
 
     [feedPDA] = PublicKey.findProgramAddressSync(
       [
@@ -108,17 +88,20 @@ describe("Extend Subscription Instruction", () => {
     await ctx.molphaProgram.methods
       .createFeed(
         feedParams,
-        dataSourceInfo,
         subscriptionDurationSeconds,
         priorityFeeBudget
       )
-      .accounts({
+      .accountsPartial({
         feed: feedPDA,
         dataSource: dataSourcePDA,
-        ethLinkPda: null,
         authority: ctx.authority.publicKey,
         protocolConfig: ctx.protocolConfigPDA,
+        userTokenAccount: ctx.userTokenAccount,
+        programTokenAccount: ctx.programTokenAccount,
+        underlyingToken: ctx.underlyingTokenMint,
         systemProgram: SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       })
       .rpc();
   });
@@ -139,11 +122,16 @@ describe("Extend Subscription Instruction", () => {
         additionalDurationSeconds,
         additionalPriorityFeeBudget
       )
-      .accounts({
+      .accountsPartial({
         feed: feedPDA,
         authority: ctx.authority.publicKey,
+        userTokenAccount: ctx.userTokenAccount,
+        programTokenAccount: ctx.programTokenAccount,
         protocolConfig: ctx.protocolConfigPDA,
+        underlyingToken: ctx.underlyingTokenMint,
         systemProgram: SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       })
       .rpc();
 
@@ -187,11 +175,16 @@ describe("Extend Subscription Instruction", () => {
           additionalDurationSeconds,
           additionalPriorityFeeBudget
         )
-        .accounts({
+        .accountsPartial({
           feed: feedPDA,
           authority: ctx.authority.publicKey,
+          userTokenAccount: ctx.userTokenAccount,
+          programTokenAccount: ctx.programTokenAccount,
           protocolConfig: ctx.protocolConfigPDA,
+          underlyingToken: ctx.underlyingTokenMint,
           systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .rpc();
 
@@ -214,11 +207,16 @@ describe("Extend Subscription Instruction", () => {
           additionalDurationSeconds,
           additionalPriorityFeeBudget
         )
-        .accounts({
+        .accountsPartial({
           feed: feedPDA,
           authority: differentAuthority.publicKey,
+          userTokenAccount: ctx.userTokenAccount,
+          programTokenAccount: ctx.programTokenAccount,
           protocolConfig: ctx.protocolConfigPDA,
+          underlyingToken: ctx.underlyingTokenMint,
           systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .signers([differentAuthority])
         .rpc();

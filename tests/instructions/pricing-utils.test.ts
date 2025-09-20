@@ -2,14 +2,14 @@ import * as anchor from "@coral-xyz/anchor";
 import { BN } from "@coral-xyz/anchor";
 import { assert } from "chai";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
   setupTestContext,
   initializeProtocol,
   TestContext,
   createTestDataSourceInfo,
-  generateTestSignature,
-  computeDataSourceId,
   createFeedParams,
+  getDataSourcePda,
 } from "../setup";
 
 describe("Pricing Utility Tests", () => {
@@ -25,8 +25,7 @@ describe("Pricing Utility Tests", () => {
       dataSourceType: number;
       source: string;
       name: string;
-      address: string;
-      signature: string;
+      address: PublicKey;
     };
 
     let dataSourceId: Uint8Array;
@@ -34,48 +33,33 @@ describe("Pricing Utility Tests", () => {
     let feedPDA: PublicKey;
 
     before(async () => {
-      // Generate test data source with signature
-      const sigData = generateTestSignature(
-        0, // Public
-        "https://api.coinbase.com/v2/prices/BTC-USD/spot",
-        "Bitcoin Price Feed"
-      );
-
       testDataSource = {
         dataSourceType: 0,
         source: "https://api.coinbase.com/v2/prices/BTC-USD/spot",
         name: "Bitcoin Price Feed",
-        address: sigData.address,
-        signature: sigData.signature,
+        address: ctx.authority.publicKey,
       };
 
       // Create test data source for feed creation
       const dataSourceInfo = createTestDataSourceInfo(
         testDataSource.dataSourceType,
         testDataSource.source,
-        testDataSource.address,
-        testDataSource.name,
-        testDataSource.signature
+        testDataSource.name
       );
 
-      dataSourceId = computeDataSourceId({
-        dataSourceType: testDataSource.dataSourceType,
-        ownerEth: testDataSource.address,
-        name: testDataSource.name,
-        source: testDataSource.source,
-      });
-
-      [dataSourcePDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from("data_source"), dataSourceId],
-        ctx.molphaProgram.programId
+      [dataSourcePDA] = getDataSourcePda(
+        ctx.molphaProgram.programId,
+        ctx.authority.publicKey,
+        testDataSource.name,
+        testDataSource.dataSourceType
       );
 
       // Create the data source
       try {
         await ctx.molphaProgram.methods
           .createDataSource(dataSourceInfo)
-          .accounts({
-            payer: ctx.authority.publicKey,
+          .accountsPartial({
+            authority: ctx.authority.publicKey,
             dataSource: dataSourcePDA,
             systemProgram: SystemProgram.programId,
           })
@@ -87,7 +71,7 @@ describe("Pricing Utility Tests", () => {
 
     it("Creates feed with different frequency and signature thresholds to test pricing", async () => {
       const jobId = "pricing-test-feed";
-      const feedParams = createFeedParams(jobId, { public: {} }, dataSourceId);
+      const feedParams = createFeedParams(jobId, { public: {} });
 
       [feedPDA] = PublicKey.findProgramAddressSync(
         [
@@ -105,9 +89,7 @@ describe("Pricing Utility Tests", () => {
       const dataSourceInfo = createTestDataSourceInfo(
         testDataSource.dataSourceType,
         testDataSource.source,
-        testDataSource.address,
-        testDataSource.name,
-        testDataSource.signature
+        testDataSource.name
       );
 
       // Create feed with 1 day subscription and 1000 lamports priority fee budget
@@ -117,17 +99,20 @@ describe("Pricing Utility Tests", () => {
       await ctx.molphaProgram.methods
         .createFeed(
           feedParams,
-          dataSourceInfo,
           subscriptionDurationSeconds,
           priorityFeeBudget
         )
-        .accounts({
+        .accountsPartial({
           feed: feedPDA,
           dataSource: dataSourcePDA,
-          ethLinkPda: null,
           authority: ctx.authority.publicKey,
           protocolConfig: ctx.protocolConfigPDA,
+          userTokenAccount: ctx.userTokenAccount,
+          programTokenAccount: ctx.programTokenAccount,
+          underlyingToken: ctx.underlyingTokenMint,
           systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .rpc();
 
@@ -173,7 +158,6 @@ describe("Pricing Utility Tests", () => {
         minSignaturesThreshold: 5, // Higher than default 2
         frequency: new anchor.BN(60), // 1 minute instead of 5 minutes
         ipfsCid: "QmTestCID123456789",
-        dataSourceId: Array.from(dataSourceId),
       };
 
       const [highFreqFeedPDA] = PublicKey.findProgramAddressSync(
@@ -192,9 +176,7 @@ describe("Pricing Utility Tests", () => {
       const dataSourceInfo = createTestDataSourceInfo(
         testDataSource.dataSourceType,
         testDataSource.source,
-        testDataSource.address,
-        testDataSource.name,
-        testDataSource.signature
+        testDataSource.name
       );
 
       // Create feed with 1 day subscription and 2000 lamports priority fee budget
@@ -204,17 +186,20 @@ describe("Pricing Utility Tests", () => {
       await ctx.molphaProgram.methods
         .createFeed(
           highFreqFeedParams,
-          dataSourceInfo,
           subscriptionDurationSeconds,
           priorityFeeBudget
         )
-        .accounts({
+        .accountsPartial({
           feed: highFreqFeedPDA,
           dataSource: dataSourcePDA,
-          ethLinkPda: null,
           authority: ctx.authority.publicKey,
           protocolConfig: ctx.protocolConfigPDA,
+          userTokenAccount: ctx.userTokenAccount,
+          programTokenAccount: ctx.programTokenAccount,
+          underlyingToken: ctx.underlyingTokenMint,
           systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .rpc();
 
@@ -280,9 +265,7 @@ describe("Pricing Utility Tests", () => {
       const dataSourceInfo = createTestDataSourceInfo(
         testDataSource.dataSourceType,
         testDataSource.source,
-        testDataSource.address,
-        testDataSource.name,
-        testDataSource.signature
+        testDataSource.name
       );
 
       // Create feed with 1 day subscription and 1000 lamports priority fee budget
@@ -292,17 +275,20 @@ describe("Pricing Utility Tests", () => {
       await ctx.molphaProgram.methods
         .createFeed(
           feedParams,
-          dataSourceInfo,
           subscriptionDurationSeconds,
           priorityFeeBudget
         )
-        .accounts({
+        .accountsPartial({
           feed: testFeedPDA,
           dataSource: dataSourcePDA,
-          ethLinkPda: null,
           authority: ctx.authority.publicKey,
           protocolConfig: ctx.protocolConfigPDA,
+          userTokenAccount: ctx.userTokenAccount,
+          programTokenAccount: ctx.programTokenAccount,
+          underlyingToken: ctx.underlyingTokenMint,
           systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .rpc();
 
@@ -345,9 +331,7 @@ describe("Pricing Utility Tests", () => {
       const dataSourceInfo = createTestDataSourceInfo(
         testDataSource.dataSourceType,
         testDataSource.source,
-        testDataSource.address,
-        testDataSource.name,
-        testDataSource.signature
+        testDataSource.name
       );
 
       // Create feed with 1 day subscription and 1000 lamports priority fee budget
@@ -357,17 +341,20 @@ describe("Pricing Utility Tests", () => {
       await ctx.molphaProgram.methods
         .createFeed(
           feedParams,
-          dataSourceInfo,
           subscriptionDurationSeconds,
           priorityFeeBudget
         )
-        .accounts({
+        .accountsPartial({
           feed: testFeedPDA,
           dataSource: dataSourcePDA,
-          ethLinkPda: null,
           authority: ctx.authority.publicKey,
           protocolConfig: ctx.protocolConfigPDA,
+          userTokenAccount: ctx.userTokenAccount,
+          programTokenAccount: ctx.programTokenAccount,
+          underlyingToken: ctx.underlyingTokenMint,
           systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .rpc();
 
@@ -385,10 +372,15 @@ describe("Pricing Utility Tests", () => {
           additionalDurationSeconds,
           additionalPriorityFeeBudget
         )
-        .accounts({
+        .accountsPartial({
           feed: testFeedPDA,
           authority: ctx.authority.publicKey,
           protocolConfig: ctx.protocolConfigPDA,
+          userTokenAccount: ctx.userTokenAccount,
+          programTokenAccount: ctx.programTokenAccount,
+          underlyingToken: ctx.underlyingTokenMint,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
         })
         .rpc();

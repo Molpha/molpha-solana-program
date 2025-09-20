@@ -12,7 +12,7 @@ pub struct Feed {
     pub authority: Pubkey,
     pub feed_type: FeedType,
     pub job_id: [u8; 32],
-    pub data_source_id: [u8; 32],
+    pub data_source: Pubkey,
     pub balance: u64,
     pub min_signatures_threshold: u8,
     pub frequency: u64,

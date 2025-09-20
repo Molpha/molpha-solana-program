@@ -1,42 +1,8 @@
-use crate::error::DataSourceError;
 use crate::error::NodeRegistryError;
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program;
 
-pub mod eip712;
-pub mod secp;
 pub mod pricing;
-
-/// Verifies a data source signature and recovers the Ethereum address
-/// This function extracts the common logic from create_data_source for reuse
-pub fn verify_data_source_signature(data: &crate::state::DataSourceInfo) -> Result<()> {
-    // 1) Rebuild digest = keccak256("\x19\x01" || domain || structHash)
-    let digest = crate::utils::eip712::digest_data_source(data)?;
-
-    // 2) Verify secp signature using syscall approach
-    let signature_rs = &data.sig[..64]; // r,s components
-    let recovery_id = data.sig[64];
-
-    let recovered_pubkey = anchor_lang::solana_program::secp256k1_recover::secp256k1_recover(
-        &digest,
-        recovery_id,
-        signature_rs,
-    )
-    .map_err(|_| error!(DataSourceError::InvalidEthereumAddress))?;
-
-    // Convert recovered public key to Ethereum address (last 20 bytes of keccak hash)
-    let pubkey_hash =
-        anchor_lang::solana_program::keccak::hash(&recovered_pubkey.to_bytes()).to_bytes();
-    let mut recovered_eth = [0u8; 20];
-    recovered_eth.copy_from_slice(&pubkey_hash[12..32]);
-
-    require!(
-        recovered_eth == data.owner_eth,
-        DataSourceError::RecoveredAddressMismatch
-    );
-
-    Ok(())
-}
 
 /// Parses a legacy Ed25519 verification instruction to extract the signer's public key and the message.
 /// The instruction data format is a 16-byte header followed by data payloads.

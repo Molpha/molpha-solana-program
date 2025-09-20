@@ -1,14 +1,15 @@
 import * as anchor from "@coral-xyz/anchor";
 import { assert } from "chai";
 import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import nacl from "tweetnacl";
 import {
   setupTestContext,
   initializeProtocol,
   TestContext,
   createTestDataSourceInfo,
-  generateTestSignature,
-  computeDataSourceId,
+  getDataSourcePda,
+  createFeedParams,
 } from "../setup";
 import { BankrunProvider } from "anchor-bankrun";
 
@@ -62,55 +63,38 @@ describe("Integration Tests: Complete Oracle Flow", () => {
         nodeRegistry.nodes.some((n) => n.equals(nodesToAdd[2].publicKey))
       );
 
-      // Step 2: Create data source
-      console.log("Step 2: Creating data source...");
-      const { signature, address } = generateTestSignature(
-        0, // Public
-        "https://api.kraken.com/0/public/Ticker?pair=XBTUSD",
-        "Kraken Bitcoin Price Integration Test"
-      );
-
       const testData = {
         dataSourceType: 0, // Public
         source: "https://api.kraken.com/0/public/Ticker?pair=XBTUSD",
-        owner: address,
-        name: "Kraken Bitcoin Price Integration Test",
+        name: "Kraken Bitcoin Price",
       };
 
       const dataSourceInfo = createTestDataSourceInfo(
         testData.dataSourceType,
         testData.source,
-        testData.owner,
         testData.name,
-        signature
       );
 
-      const dataSourceId = computeDataSourceId({
-        dataSourceType: testData.dataSourceType,
-        ownerEth: testData.owner,
-        name: testData.name,
-        source: testData.source,
-      });
-
-      const [dataSourcePDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from("data_source"), dataSourceId],
-        ctx.molphaProgram.programId
+      const [dataSourcePDA] = getDataSourcePda(
+        ctx.molphaProgram.programId,
+        ctx.authority.publicKey,
+        testData.name,
+        testData.dataSourceType
       );
 
       await ctx.molphaProgram.methods
         .createDataSource(dataSourceInfo as any)
         .accountsPartial({
           dataSource: dataSourcePDA,
-          payer: ctx.authority.publicKey,
+          authority: ctx.authority.publicKey,
         })
         .rpc();
 
       // Verify data source was created
       const dataSourceAccount =
         await ctx.molphaProgram.account.dataSource.fetch(dataSourcePDA);
-      assert.deepEqual(dataSourceAccount.id, Array.from(dataSourceId));
+      assert.deepEqual(dataSourceAccount.owner, ctx.authority.publicKey);
       assert.deepEqual(dataSourceAccount.dataSourceType, { public: {} });
-      assert.equal(dataSourceAccount.ownerEth.length, 20);
 
       // Step 3: Create feed using the data source
       console.log("Step 3: Creating feed...");
@@ -122,7 +106,6 @@ describe("Integration Tests: Complete Oracle Flow", () => {
         minSignaturesThreshold: 2, // Require 2 out of 3 nodes
         frequency: new anchor.BN(600), // 10 minutes
         ipfsCid: "QmIntegrationTest123",
-        dataSourceId: Array.from(dataSourceId),
       };
 
       const [feedPDA] = PublicKey.findProgramAddressSync(
@@ -144,7 +127,6 @@ describe("Integration Tests: Complete Oracle Flow", () => {
       await ctx.molphaProgram.methods
         .createFeed(
           feedParams as any,
-          dataSourceInfo as any,
           subscriptionDurationSeconds,
           priorityFeeBudget
         )
@@ -152,6 +134,13 @@ describe("Integration Tests: Complete Oracle Flow", () => {
           feed: feedPDA,
           dataSource: dataSourcePDA,
           authority: ctx.authority.publicKey,
+          protocolConfig: ctx.protocolConfigPDA,
+          userTokenAccount: ctx.userTokenAccount,
+          programTokenAccount: ctx.programTokenAccount,
+          underlyingToken: ctx.underlyingTokenMint,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .rpc();
 
@@ -161,7 +150,7 @@ describe("Integration Tests: Complete Oracle Flow", () => {
       const feed = await ctx.molphaProgram.account.feed.fetch(feedPDA);
       assert.ok(feed.authority.equals(ctx.authority.publicKey));
       assert.deepEqual(feed.feedType, { public: {} });
-      assert.deepEqual(feed.dataSourceId, Array.from(dataSourceId));
+      assert.deepEqual(feed.dataSource, dataSourcePDA);
       assert.equal(feed.minSignaturesThreshold, 2);
       assert.equal(feed.frequency.toNumber(), 600);
       assert.equal(feed.ipfsCid, "QmIntegrationTest123");
@@ -198,7 +187,7 @@ describe("Integration Tests: Complete Oracle Flow", () => {
       // Build + send via Anchor (ensures correct accounts/ordering/provider)
       await ctx.molphaProgram.methods
         .publishAnswer(answer)
-        .accounts({
+        .accountsPartial({
           feed: feedPDA,
           nodeRegistry: ctx.nodeRegistryPDA,
           instructions: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
@@ -227,7 +216,7 @@ describe("Integration Tests: Complete Oracle Flow", () => {
         try {
           await ctx.molphaProgram.methods
             .addNode(node.publicKey)
-            .accounts({
+            .accountsPartial({
               nodeRegistry: ctx.nodeRegistryPDA,
               authority: ctx.authority.publicKey,
               systemProgram: SystemProgram.programId,
@@ -238,46 +227,30 @@ describe("Integration Tests: Complete Oracle Flow", () => {
         }
       }
 
-      // Step 2: Create private data source
-      console.log("Step 2: Creating private data source...");
-      const { signature, address } = generateTestSignature(
-        1, // Private
-        "https://private-api.example.com/btc-price",
-        "Private API Integration Test"
-      );
-
       const testData = {
         dataSourceType: 1, // Private
         source: "https://private-api.example.com/btc-price",
-        owner: address,
         name: "Private API Integration Test",
       };
 
       const dataSourceInfo = createTestDataSourceInfo(
         testData.dataSourceType,
         testData.source,
-        testData.owner,
         testData.name,
-        signature
       );
 
-      const dataSourceId = computeDataSourceId({
-        dataSourceType: testData.dataSourceType,
-        ownerEth: testData.owner,
-        name: testData.name,
-        source: testData.source,
-      });
-
-      const [dataSourcePDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from("data_source"), dataSourceId],
-        ctx.molphaProgram.programId
+      const [dataSourcePDA] = getDataSourcePda(
+        ctx.molphaProgram.programId,
+        ctx.authority.publicKey,
+        dataSourceInfo.name,
+        1
       );
 
       await ctx.molphaProgram.methods
         .createDataSource(dataSourceInfo as any)
         .accountsPartial({
           dataSource: dataSourcePDA,
-          payer: ctx.authority.publicKey,
+          authority: ctx.authority.publicKey,
         })
         .rpc();
 
@@ -291,7 +264,6 @@ describe("Integration Tests: Complete Oracle Flow", () => {
         minSignaturesThreshold: 1, // Require only 1 signature for personal feed
         frequency: new anchor.BN(900), // 15 minutes
         ipfsCid: "QmPrivateIntegrationTest",
-        dataSourceId: Array.from(dataSourceId),
       };
 
       const [feedPDA] = PublicKey.findProgramAddressSync(
@@ -313,7 +285,6 @@ describe("Integration Tests: Complete Oracle Flow", () => {
       await ctx.molphaProgram.methods
         .createFeed(
           feedParams as any,
-          dataSourceInfo as any,
           subscriptionDurationSeconds,
           priorityFeeBudget
         )
@@ -322,6 +293,12 @@ describe("Integration Tests: Complete Oracle Flow", () => {
           dataSource: dataSourcePDA,
           authority: ctx.authority.publicKey,
           protocolConfig: ctx.protocolConfigPDA,
+          userTokenAccount: ctx.userTokenAccount,
+          programTokenAccount: ctx.programTokenAccount,
+          underlyingToken: ctx.underlyingTokenMint,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .rpc();
 
@@ -331,7 +308,7 @@ describe("Integration Tests: Complete Oracle Flow", () => {
 
       await ctx.molphaProgram.methods
         .topUp(topUpAmount)
-        .accounts({
+        .accountsPartial({
           feed: feedPDA,
           authority: ctx.authority.publicKey,
         })
@@ -373,7 +350,7 @@ describe("Integration Tests: Complete Oracle Flow", () => {
       // Use the same pattern as working tests
       await ctx.molphaProgram.methods
         .publishAnswer(answer)
-        .accounts({
+        .accountsPartial({
           feed: feedPDA,
           nodeRegistry: ctx.nodeRegistryPDA,
           protocolConfig: ctx.protocolConfigPDA,
@@ -393,37 +370,25 @@ describe("Integration Tests: Complete Oracle Flow", () => {
     it("Fails to publish data with insufficient signatures", async () => {
       // Create a feed with high signature threshold
       const feedId = "high-threshold-feed";
-      const { signature, address } = generateTestSignature(
-        0, // Public
-        "https://api.example.com/high-threshold",
-        "High Threshold Test"
-      );
 
       const dataSourceInfo = createTestDataSourceInfo(
         0,
         "https://api.example.com/high-threshold",
-        address,
         "High Threshold Test",
-        signature
       );
 
-      const dataSourceId = computeDataSourceId({
-        dataSourceType: 0,
-        ownerEth: address,
-        name: "High Threshold Test",
-        source: "https://api.example.com/high-threshold",
-      });
-
-      const [dataSourcePDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from("data_source"), dataSourceId],
-        ctx.molphaProgram.programId
+      const [dataSourcePDA] = getDataSourcePda(
+        ctx.molphaProgram.programId,
+        ctx.authority.publicKey,
+        dataSourceInfo.name,
+        0
       );
 
       await ctx.molphaProgram.methods
         .createDataSource(dataSourceInfo as any)
-        .accounts({
+        .accountsPartial({
           dataSource: dataSourcePDA,
-          payer: ctx.authority.publicKey,
+          authority: ctx.authority.publicKey,
           systemProgram: SystemProgram.programId,
         })
         .rpc();
@@ -435,7 +400,6 @@ describe("Integration Tests: Complete Oracle Flow", () => {
         minSignaturesThreshold: 3, // Require 3 signatures
         frequency: new anchor.BN(300),
         ipfsCid: "QmHighThreshold",
-        dataSourceId: Array.from(dataSourceId),
       };
 
       const [feedPDA] = PublicKey.findProgramAddressSync(
@@ -457,15 +421,20 @@ describe("Integration Tests: Complete Oracle Flow", () => {
       await ctx.molphaProgram.methods
         .createFeed(
           feedParams as any,
-          dataSourceInfo as any,
           subscriptionDurationSeconds,
           priorityFeeBudget
         )
-        .accounts({
+        .accountsPartial({
           feed: feedPDA,
           dataSource: dataSourcePDA,
           authority: ctx.authority.publicKey,
+          protocolConfig: ctx.protocolConfigPDA,
+          userTokenAccount: ctx.userTokenAccount,
+          programTokenAccount: ctx.programTokenAccount,
+          underlyingToken: ctx.underlyingTokenMint,
           systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .rpc();
 
@@ -498,7 +467,7 @@ describe("Integration Tests: Complete Oracle Flow", () => {
       transaction.add(
         await ctx.molphaProgram.methods
           .publishAnswer(answer)
-          .accounts({
+          .accountsPartial({
             feed: feedPDA,
             nodeRegistry: ctx.nodeRegistryPDA,
             instructions: anchor.web3.SYSVAR_INSTRUCTIONS_PUBKEY,
@@ -524,46 +493,31 @@ describe("Integration Tests: Complete Oracle Flow", () => {
     });
 
     it("Demonstrates multi-feed data source sharing", async () => {
-      // Create a shared data source
-      const { signature, address } = generateTestSignature(
-        0, // Public
-        "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
-        "Shared CoinGecko Data Source"
-      );
-
       const sharedDataSource = {
         dataSourceType: 0,
         source:
           "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
-        owner: address,
         name: "Shared CoinGecko Data Source",
       };
 
       const dataSourceInfo = createTestDataSourceInfo(
         sharedDataSource.dataSourceType,
         sharedDataSource.source,
-        sharedDataSource.owner,
         sharedDataSource.name,
-        signature
       );
 
-      const dataSourceId = computeDataSourceId({
-        dataSourceType: sharedDataSource.dataSourceType,
-        ownerEth: sharedDataSource.owner,
-        name: sharedDataSource.name,
-        source: sharedDataSource.source,
-      });
-
-      const [dataSourcePDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from("data_source"), dataSourceId],
-        ctx.molphaProgram.programId
+      const [dataSourcePDA] = getDataSourcePda(
+        ctx.molphaProgram.programId,
+        ctx.authority.publicKey,
+        sharedDataSource.name,
+        sharedDataSource.dataSourceType
       );
 
       await ctx.molphaProgram.methods
         .createDataSource(dataSourceInfo as any)
-        .accounts({
+        .accountsPartial({
           dataSource: dataSourcePDA,
-          payer: ctx.authority.publicKey,
+          authority: ctx.authority.publicKey,
           systemProgram: SystemProgram.programId,
         })
         .rpc();
@@ -594,7 +548,6 @@ describe("Integration Tests: Complete Oracle Flow", () => {
           minSignaturesThreshold: config.threshold,
           frequency: new anchor.BN(config.frequency),
           ipfsCid: `QmShared${config.id}`,
-          dataSourceId: Array.from(dataSourceId),
         };
 
         const feedTypeValue = config.type.public ? 0 : 1;
@@ -617,16 +570,20 @@ describe("Integration Tests: Complete Oracle Flow", () => {
         await ctx.molphaProgram.methods
           .createFeed(
             feedParams as any,
-            dataSourceInfo as any,
             subscriptionDurationSeconds,
             priorityFeeBudget
           )
-          .accounts({
+          .accountsPartial({
             feed: feedPDA,
             dataSource: dataSourcePDA,
             authority: ctx.authority.publicKey,
             protocolConfig: ctx.protocolConfigPDA,
+            userTokenAccount: ctx.userTokenAccount,
+            programTokenAccount: ctx.programTokenAccount,
+            underlyingToken: ctx.underlyingTokenMint,
             systemProgram: SystemProgram.programId,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           })
           .rpc();
 
@@ -664,7 +621,7 @@ describe("Integration Tests: Complete Oracle Flow", () => {
         // Use the same pattern as working tests
         await ctx.molphaProgram.methods
           .publishAnswer(answer)
-          .accounts({
+          .accountsPartial({
             feed: pda,
             nodeRegistry: ctx.nodeRegistryPDA,
             protocolConfig: ctx.protocolConfigPDA,
@@ -676,7 +633,7 @@ describe("Integration Tests: Complete Oracle Flow", () => {
         // Verify data was published
         const feed = await ctx.molphaProgram.account.feed.fetch(pda);
         assert.deepEqual(feed.latestAnswer.value, answer.value);
-        assert.deepEqual(feed.dataSourceId, Array.from(dataSourceId));
+        assert.deepEqual(feed.dataSource, dataSourcePDA);
       }
 
       console.log(

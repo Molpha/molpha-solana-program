@@ -3,6 +3,11 @@ import { Program, BN, AnchorError, Wallet } from "@coral-xyz/anchor";
 import { Molpha } from "../target/types/molpha";
 import { ethers } from "ethers";
 import { Keypair, SystemProgram, PublicKey } from "@solana/web3.js";
+import { 
+  getAssociatedTokenAddressSync,
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 import { BankrunProvider } from "anchor-bankrun";
 import * as toml from "toml";
 import * as fs from "fs";
@@ -15,6 +20,10 @@ export interface TestContext {
   nodes: Keypair[];
   authority: anchor.Wallet;
   provider: BankrunProvider;
+  // SPL Token related
+  underlyingTokenMint: PublicKey;
+  programTokenAccount: PublicKey;
+  userTokenAccount: PublicKey;
 }
 
 function getProgramId(): PublicKey {
@@ -77,6 +86,25 @@ export async function getProvider() {
   // We can use it directly - no need to create a new wallet
   const wallet = loadWallet();
 
+  // Create mock token accounts with fixed addresses for testing
+  const mockTokenMint = new PublicKey("11111111111111111111111111111112");
+  
+  // Calculate the protocol config PDA to derive the correct ATA addresses
+  const [protocolConfigPDA] = PublicKey.findProgramAddressSync(
+    [Buffer.from("config")],
+    new PublicKey("EwkRYuQXEAfiZ3aKs6Dfoi1r6FKch4voNQEKQkRvniW1") // Program ID
+  );
+  
+  const userTokenAccount = getAssociatedTokenAddressSync(
+    mockTokenMint,
+    wallet.publicKey
+  );
+  const programTokenAccount = getAssociatedTokenAddressSync(
+    mockTokenMint,
+    protocolConfigPDA,
+    true // allowOwnerOffCurve
+  );
+
   const newAccounts = { wallet };
   // Set the balance of testAccount
   const wa = Object.values(newAccounts).map((acc) => ({
@@ -88,6 +116,68 @@ export async function getProvider() {
       data: Buffer.alloc(0),
     },
   }));
+
+  // Create properly initialized SPL token mint account data
+  const mintData = Buffer.alloc(82);
+  mintData.writeUInt32LE(1, 0); // mint_authority_option (1 = Some)
+  wallet.publicKey.toBuffer().copy(mintData, 4); // mint_authority
+  mintData.writeBigUInt64LE(BigInt(1000000000000), 36); // supply (1M tokens with 6 decimals)
+  mintData.writeUInt8(6, 44); // decimals
+  mintData.writeUInt8(1, 45); // is_initialized
+  mintData.writeUInt32LE(0, 46); // freeze_authority_option (0 = None)
+
+  wa.push({
+    address: mockTokenMint,
+    info: {
+      lamports: 1000_000_000,
+      executable: false,
+      owner: TOKEN_PROGRAM_ID,
+      data: mintData,
+    },
+  });
+
+  // Create properly initialized user token account data
+  const userTokenData = Buffer.alloc(165);
+  mockTokenMint.toBuffer().copy(userTokenData, 0); // mint
+  wallet.publicKey.toBuffer().copy(userTokenData, 32); // owner
+  userTokenData.writeBigUInt64LE(BigInt(500000000000), 64); // amount (500k tokens)
+  userTokenData.writeUInt32LE(0, 72); // delegate_option (0 = None)
+  userTokenData.writeUInt8(1, 108); // state (1 = initialized)
+  userTokenData.writeUInt32LE(0, 109); // is_native_option (0 = None)
+  userTokenData.writeBigUInt64LE(BigInt(0), 113); // delegated_amount
+  userTokenData.writeUInt32LE(0, 121); // close_authority_option (0 = None)
+
+  wa.push({
+    address: userTokenAccount,
+    info: {
+      lamports: 2039280,
+      executable: false,
+      owner: TOKEN_PROGRAM_ID,
+      data: userTokenData,
+    },
+  });
+
+  // Create properly initialized program token account data (initially empty)
+  const programTokenData = Buffer.alloc(165);
+  mockTokenMint.toBuffer().copy(programTokenData, 0); // mint
+  // Program token account authority is the protocol config PDA
+  protocolConfigPDA.toBuffer().copy(programTokenData, 32); // owner
+  programTokenData.writeBigUInt64LE(BigInt(0), 64); // amount (0 initially)
+  programTokenData.writeUInt32LE(0, 72); // delegate_option (0 = None)
+  programTokenData.writeUInt8(1, 108); // state (1 = initialized)
+  programTokenData.writeUInt32LE(0, 109); // is_native_option (0 = None)
+  programTokenData.writeBigUInt64LE(BigInt(0), 113); // delegated_amount
+  programTokenData.writeUInt32LE(0, 121); // close_authority_option (0 = None)
+
+  wa.push({
+    address: programTokenAccount,
+    info: {
+      lamports: 2039280,
+      executable: false,
+      owner: TOKEN_PROGRAM_ID,
+      data: programTokenData,
+    },
+  });
 
   const context = await startAnchor(
     ".",
@@ -139,6 +229,19 @@ export async function setupTestContext(): Promise<TestContext> {
     nodes.push(Keypair.generate());
   }
 
+  // For testing, we'll use fixed addresses that we created in getProvider
+  // This avoids the complexity of creating real SPL token accounts in bankrun
+  const underlyingTokenMint = new PublicKey("11111111111111111111111111111112"); // Mock mint
+  const userTokenAccount = getAssociatedTokenAddressSync(
+    underlyingTokenMint,
+    authority.publicKey
+  );
+  const programTokenAccount = getAssociatedTokenAddressSync(
+    underlyingTokenMint,
+    protocolConfigPDA,
+    true // allowOwnerOffCurve
+  );
+
   return {
     molphaProgram,
     nodeRegistryPDA,
@@ -146,6 +249,9 @@ export async function setupTestContext(): Promise<TestContext> {
     nodes,
     authority,
     provider,
+    underlyingTokenMint,
+    programTokenAccount,
+    userTokenAccount,
   };
 }
 
@@ -153,60 +259,31 @@ export async function initializeProtocol(ctx: TestContext): Promise<void> {
   try {
     // Initialize both node registry and protocol config in a single call
     await ctx.molphaProgram.methods
-      .initialize() // Legacy fee_per_update
-      .accounts({
+      .initialize()
+      .accountsPartial({
         nodeRegistry: ctx.nodeRegistryPDA,
         protocolConfig: ctx.protocolConfigPDA,
+        underlyingToken: ctx.underlyingTokenMint,
+        programTokenAccount: ctx.programTokenAccount,
         authority: ctx.authority.publicKey,
         systemProgram: SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       })
       .rpc();
   } catch (e) {
     // Ignore if already initialized
+    console.log("Protocol initialization error (may be already initialized):", e);
   }
-}
-
-// Test signature for EIP-712 verification tests
-export const testSignature =
-  "0xb8b5718dedd6ba74f754a35ec92064a30443559e7f8b2e5d2b43f3b56147014d4c328a3a482feaebd969bd501975a81676feea6ca313bfebea18fff4f3d1e9e51c";
-
-// Helper functions for creating test data sources
-export function createTestDataSourceInfo(
-  dataSourceType: number,
-  source: string,
-  owner: string,
-  name: string,
-  signature: string
-) {
-  const recoveryId = parseInt(signature.slice(-2), 16) - 27;
-  const sigWithoutRecoveryId = Buffer.from(signature.slice(2, -2), "hex");
-  const sigWithSolanaRecoveryId = Buffer.concat([
-    sigWithoutRecoveryId,
-    Buffer.from([recoveryId]),
-  ]);
-
-  // Use proper discriminated union format for the enum
-  const dataSourceTypeEnum =
-    dataSourceType === 1 ? { private: {} } : { public: {} };
-
-  return {
-    dataSourceType: dataSourceTypeEnum,
-    source: source,
-    ownerEth: Array.from(Buffer.from(owner.slice(2), "hex")),
-    name: name,
-    sig: Array.from(sigWithSolanaRecoveryId),
-  };
 }
 
 // Helper function to create feed parameters
 export function createFeedParams(
   jobId: string,
   feedType: { public: {} } | { personal: {} },
-  dataSourceId: Uint8Array
 ) {
   return {
     name: jobId,
-    dataSourceId: Array.from(dataSourceId),
     jobId: Array.from(Buffer.from(jobId.padEnd(32, "\0"))),
     feedType: feedType,
     minSignaturesThreshold: 2,
@@ -215,188 +292,31 @@ export function createFeedParams(
   };
 }
 
-export function buildEIP712Domain(name: string, version: string) {
-  // Use hardcoded DOMAIN_SEPARATOR from DataSourceRegistry.sol
-  // bytes32 private constant DOMAIN_SEPARATOR = 0x91af22df910089dce34bc41d0790bb4a1beee77dda588667c082bb964143739f;
-  return Buffer.from([
-    0x91, 0xaf, 0x22, 0xdf, 0x91, 0x00, 0x89, 0xdc, 0xe3, 0x4b, 0xc4, 0x1d,
-    0x07, 0x90, 0xbb, 0x4a, 0x1b, 0xee, 0xe7, 0x7d, 0xda, 0x58, 0x86, 0x67,
-    0xc0, 0x82, 0xbb, 0x96, 0x41, 0x43, 0x73, 0x9f,
-  ]);
-}
-
-export function buildDataSourceStructHash(data: any) {
-  const typeHash = Buffer.from(
-    ethers
-      .keccak256(
-        Buffer.from(
-          "DataSource(uint8 type,string source,address owner,string name)"
-        )
-      )
-      .slice(2),
-    "hex"
-  );
-
-  const sourceHash = Buffer.from(
-    ethers.keccak256(Buffer.from(data.source)).slice(2),
-    "hex"
-  );
-  const nameHash = Buffer.from(
-    ethers.keccak256(Buffer.from(data.name)).slice(2),
-    "hex"
-  );
-
-  // Pad owner address to 32 bytes
-  const ownerEthPadded = Buffer.alloc(32);
-  Buffer.from(data.owner.slice(2), "hex").copy(ownerEthPadded, 12);
-
-  // Pad dataSourceType to 32 bytes
-  const dataSourceTypeBytes = Buffer.alloc(32);
-  dataSourceTypeBytes[31] = data.dataSourceType;
-
-  // Match Solidity parameter order: (type, source, owner, name)
-  return Buffer.from(
-    ethers
-      .keccak256(
-        Buffer.concat([
-          typeHash,
-          dataSourceTypeBytes,
-          sourceHash,
-          ownerEthPadded,
-          nameHash,
-        ])
-      )
-      .slice(2),
-    "hex"
-  );
-}
-
-export function buildEthLinkStructHash(data: any) {
-  const typeHash = Buffer.from(
-    ethers
-      .keccak256(Buffer.from("PermitGrantee(address ownerEth,bytes32 grantee)"))
-      .slice(2),
-    "hex"
-  );
-
-  // Pad owner address to 32 bytes
-  const ownerEthPadded = Buffer.alloc(32);
-  Buffer.from(data.owner.slice(2), "hex").copy(ownerEthPadded, 12);
-
-  // Convert grantee (Solana public key) to bytes32
-  const granteePublicKey = new PublicKey(data.grantee);
-  const granteeBytes = granteePublicKey.toBuffer();
-  const granteePadded = Buffer.alloc(32);
-  granteeBytes.copy(granteePadded, 0);
-
-  return Buffer.from(
-    ethers
-      .keccak256(Buffer.concat([typeHash, ownerEthPadded, granteePadded]))
-      .slice(2),
-    "hex"
-  );
-}
-
-export function buildEIP712Digest(
-  domainSeparator: Uint8Array,
-  structHash: Uint8Array
-) {
-  return Buffer.from(
-    ethers
-      .keccak256(
-        Buffer.concat([Buffer.from("\x19\x01"), domainSeparator, structHash])
-      )
-      .slice(2),
-    "hex"
-  );
-}
-
-export function computeDataSourceId(data: any) {
-  const serialized = Buffer.concat([
-    Buffer.from([data.dataSourceType]),
-    Buffer.from(data.source || ""),
-    Buffer.from(data.ownerEth.slice(2), "hex"),
-    Buffer.from(data.name),
-  ]);
-  return Buffer.from(ethers.keccak256(serialized).slice(2), "hex");
-}
-
-// Generate a keypair and sign data for testing
-export function generateTestSignature(
+export function createTestDataSourceInfo(
   dataSourceType: number,
   source: string,
-  name: string
+  name: string,
 ) {
-  // Generate a random Ethereum-style keypair
-  const wallet = ethers.Wallet.createRandom();
-  const privateKey = wallet.privateKey;
-  const address = wallet.address;
 
-  // Build the EIP-712 domain separator
-  const domainSeparator = buildEIP712Domain("Molpha Oracles", "1");
-
-  // Build the struct hash for the data source
-  const structHash = buildDataSourceStructHash({
-    dataSourceType,
-    source,
-    owner: address,
-    name,
-  });
-
-  // Build the final digest
-  const digest = buildEIP712Digest(domainSeparator, structHash);
-
-  // Sign the digest
-  const signingKey = new ethers.SigningKey(privateKey);
-  const signature = signingKey.sign(digest);
-
-  // Convert to the format expected by the program (r + s + v)
-  const r = signature.r.slice(2); // Remove 0x prefix
-  const s = signature.s.slice(2); // Remove 0x prefix
-  const v = signature.v.toString(16).padStart(2, "0"); // Convert v to hex
-
-  const fullSignature = `0x${r}${s}${v}`;
+  // Use proper discriminated union format for the enum
+  const dataSourceTypeEnum =
+    dataSourceType === 1 ? { private: {} } : { public: {} };
 
   return {
-    signature: fullSignature,
-    address: address,
-    privateKey: privateKey,
+    dataSourceType: dataSourceTypeEnum,
+    source: source,
+    name: name,
   };
 }
 
-// Generate a keypair and sign permit data for testing
-export function generatePermitSignature(grantee: string) {
-  // Generate a random Ethereum-style keypair
-  const wallet = ethers.Wallet.createRandom();
-  const privateKey = wallet.privateKey;
-  const address = wallet.address;
-
-  // Build the EIP-712 domain separator
-  const domainSeparator = buildEIP712Domain("Molpha Oracles", "1");
-
-  // Build the struct hash for the permit
-  const structHash = buildEthLinkStructHash({
-    owner: address,
-    grantee: grantee,
-  });
-
-  // Build the final digest
-  const digest = buildEIP712Digest(domainSeparator, structHash);
-
-  // Sign the digest
-  const signingKey = new ethers.SigningKey(privateKey);
-  const signature = signingKey.sign(digest);
-
-  // Convert to the format expected by the program (r + s + v)
-  const r = signature.r.slice(2); // Remove 0x prefix
-  const s = signature.s.slice(2); // Remove 0x prefix
-  const v = signature.v.toString(16).padStart(2, "0"); // Convert v to hex
-
-  const fullSignature = `0x${r}${s}${v}`;
-
-  return {
-    signature: fullSignature,
-    address: address,
-    privateKey: privateKey,
-  };
+export function getDataSourcePda(programId: PublicKey, authority: PublicKey, name: string, dataSourceType: number) {
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("data_source"), 
+      authority.toBuffer(), 
+      Buffer.from(name), 
+      Buffer.from([dataSourceType]), 
+    ],
+    programId
+  );
 }

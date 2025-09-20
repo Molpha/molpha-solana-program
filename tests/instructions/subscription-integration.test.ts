@@ -1,6 +1,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import { assert } from "chai";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { BankrunProvider } from "anchor-bankrun";
 import * as nacl from "tweetnacl";
 import {
@@ -8,8 +9,7 @@ import {
   initializeProtocol,
   TestContext,
   createTestDataSourceInfo,
-  generateTestSignature,
-  computeDataSourceId,
+  getDataSourcePda,
   createFeedParams,
 } from "../setup";
 
@@ -43,57 +43,39 @@ describe("Subscription Integration Tests", () => {
     dataSourceType: number;
     source: string;
     name: string;
-    address: string;
-    signature: string;
   };
 
-  let dataSourceId: Uint8Array;
   let dataSourcePDA: PublicKey;
   let feedPDA: PublicKey;
 
   before(async () => {
-    // Generate test data source with signature
-    const sigData = generateTestSignature(
-      0, // Public
-      "https://api.coinbase.com/v2/prices/BTC-USD/spot",
-      "Bitcoin Price Feed"
-    );
 
     testDataSource = {
       dataSourceType: 0,
       source: "https://api.coinbase.com/v2/prices/BTC-USD/spot",
       name: "Bitcoin Price Feed",
-      address: sigData.address,
-      signature: sigData.signature,
     };
 
     // Create test data source for feed creation
     const dataSourceInfo = createTestDataSourceInfo(
       testDataSource.dataSourceType,
       testDataSource.source,
-      testDataSource.address,
       testDataSource.name,
-      testDataSource.signature
     );
 
-    dataSourceId = computeDataSourceId({
-      dataSourceType: testDataSource.dataSourceType,
-      ownerEth: testDataSource.address,
-      name: testDataSource.name,
-      source: testDataSource.source,
-    });
-
-    [dataSourcePDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("data_source"), dataSourceId],
-      ctx.molphaProgram.programId
+    [dataSourcePDA] = getDataSourcePda(
+      ctx.molphaProgram.programId,
+      ctx.authority.publicKey,
+      testDataSource.name,
+      testDataSource.dataSourceType
     );
 
     // Create the data source
     try {
       await ctx.molphaProgram.methods
-        .createDataSource(dataSourceInfo)
-        .accounts({
-          payer: ctx.authority.publicKey,
+        .createDataSource(dataSourceInfo as any)
+        .accountsPartial({
+          authority: ctx.authority.publicKey,
           dataSource: dataSourcePDA,
           systemProgram: SystemProgram.programId,
         })
@@ -106,7 +88,7 @@ describe("Subscription Integration Tests", () => {
   describe("Create Feed with Subscription", () => {
     it("Successfully creates a feed with subscription", async () => {
       const jobId = "feed-with-subscription-test";
-      const feedParams = createFeedParams(jobId, { public: {} }, dataSourceId);
+      const feedParams = createFeedParams(jobId, { public: {} });
 
       [feedPDA] = PublicKey.findProgramAddressSync(
         [
@@ -124,9 +106,7 @@ describe("Subscription Integration Tests", () => {
       const dataSourceInfo = createTestDataSourceInfo(
         testDataSource.dataSourceType,
         testDataSource.source,
-        testDataSource.address,
         testDataSource.name,
-        testDataSource.signature
       );
 
       // Create feed with 1 day subscription and 1000 lamports priority fee budget
@@ -135,18 +115,21 @@ describe("Subscription Integration Tests", () => {
 
       await ctx.molphaProgram.methods
         .createFeed(
-          feedParams,
-          dataSourceInfo,
+          feedParams as any,
           subscriptionDurationSeconds,
           priorityFeeBudget
         )
-        .accounts({
+        .accountsPartial({
           feed: feedPDA,
           dataSource: dataSourcePDA,
-          ethLinkPda: null,
           authority: ctx.authority.publicKey,
           protocolConfig: ctx.protocolConfigPDA,
+          userTokenAccount: ctx.userTokenAccount,
+          programTokenAccount: ctx.programTokenAccount,
+          underlyingToken: ctx.underlyingTokenMint,
           systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .rpc();
 
@@ -158,7 +141,7 @@ describe("Subscription Integration Tests", () => {
       assert.equal(feed.minSignaturesThreshold, 2);
       assert.equal(feed.frequency.toNumber(), 300);
       assert.equal(feed.ipfsCid, "QmTestCID123456789");
-      assert.deepEqual(feed.dataSourceId, Array.from(dataSourceId));
+      assert.deepEqual(feed.dataSource, dataSourcePDA);
       assert.deepEqual(
         feed.jobId,
         Array.from(Buffer.from(jobId.padEnd(32, "\0")))
@@ -177,7 +160,7 @@ describe("Subscription Integration Tests", () => {
 
     it("Fails to create feed with subscription duration less than 1 day", async () => {
       const jobId = "short-subscription-feed";
-      const feedParams = createFeedParams(jobId, { public: {} }, dataSourceId);
+      const feedParams = createFeedParams(jobId, { public: {} });
 
       const [shortFeedPDA] = PublicKey.findProgramAddressSync(
         [
@@ -195,9 +178,7 @@ describe("Subscription Integration Tests", () => {
       const dataSourceInfo = createTestDataSourceInfo(
         testDataSource.dataSourceType,
         testDataSource.source,
-        testDataSource.address,
         testDataSource.name,
-        testDataSource.signature
       );
 
       // Try to create feed with 12 hours subscription (less than 1 day)
@@ -207,16 +188,19 @@ describe("Subscription Integration Tests", () => {
       try {
         await ctx.molphaProgram.methods
           .createFeed(
-            feedParams,
-            dataSourceInfo,
+            feedParams as any,
             subscriptionDurationSeconds,
             priorityFeeBudget
           )
-          .accounts({
+          .accountsPartial({
             feed: shortFeedPDA,
             dataSource: dataSourcePDA,
-            ethLinkPda: null,
             authority: ctx.authority.publicKey,
+            userTokenAccount: ctx.userTokenAccount,
+            programTokenAccount: ctx.programTokenAccount,
+            underlyingToken: ctx.underlyingTokenMint,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
             protocolConfig: ctx.protocolConfigPDA,
             systemProgram: SystemProgram.programId,
           })
@@ -246,11 +230,17 @@ describe("Subscription Integration Tests", () => {
           additionalDurationSeconds,
           additionalPriorityFeeBudget
         )
-        .accounts({
+        .accountsPartial({
           feed: feedPDA,
+          dataSource: dataSourcePDA,
           authority: ctx.authority.publicKey,
           protocolConfig: ctx.protocolConfigPDA,
+          userTokenAccount: ctx.userTokenAccount,
+          programTokenAccount: ctx.programTokenAccount,
+          underlyingToken: ctx.underlyingTokenMint,
           systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .rpc();
 
@@ -287,10 +277,15 @@ describe("Subscription Integration Tests", () => {
             additionalDurationSeconds,
             additionalPriorityFeeBudget
           )
-          .accounts({
+          .accountsPartial({
             feed: feedPDA,
             authority: ctx.authority.publicKey,
             protocolConfig: ctx.protocolConfigPDA,
+            userTokenAccount: ctx.userTokenAccount,
+            programTokenAccount: ctx.programTokenAccount,
+            underlyingToken: ctx.underlyingTokenMint,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
           })
           .rpc();
@@ -314,10 +309,15 @@ describe("Subscription Integration Tests", () => {
             additionalDurationSeconds,
             additionalPriorityFeeBudget
           )
-          .accounts({
+          .accountsPartial({
             feed: feedPDA,
             authority: differentAuthority.publicKey,
             protocolConfig: ctx.protocolConfigPDA,
+            userTokenAccount: ctx.userTokenAccount,
+            programTokenAccount: ctx.programTokenAccount,
+            underlyingToken: ctx.underlyingTokenMint,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
           })
           .signers([differentAuthority])
@@ -325,6 +325,7 @@ describe("Subscription Integration Tests", () => {
 
         assert.fail("Should have failed with authority mismatch error");
       } catch (error) {
+        console.log("my-xerror:", error);
         // Should fail because differentAuthority is not the feed owner
         assert.include(error.message, "Error");
       }
@@ -339,7 +340,7 @@ describe("Subscription Integration Tests", () => {
       
       await ctx.molphaProgram.methods
         .addNode(testNode1.publicKey)
-        .accounts({
+        .accountsPartial({
           nodeRegistry: ctx.nodeRegistryPDA,
           authority: ctx.authority.publicKey,
         })
@@ -347,7 +348,7 @@ describe("Subscription Integration Tests", () => {
         
       await ctx.molphaProgram.methods
         .addNode(testNode2.publicKey)
-        .accounts({
+        .accountsPartial({
           nodeRegistry: ctx.nodeRegistryPDA,
           authority: ctx.authority.publicKey,
         })
@@ -355,7 +356,7 @@ describe("Subscription Integration Tests", () => {
 
       // Create a test answer with a timestamp further in the past
       const answer = {
-        value: Buffer.from("12345678901234567890123456789012"), // 32 bytes
+        value: Array.from(Buffer.from("12345678901234567890123456789012")), // 32 bytes
         timestamp: await safePastOnchainTimestamp(ctx.provider, 30), // Use timestamp 30 seconds in the past
       };
 
@@ -378,7 +379,7 @@ describe("Subscription Integration Tests", () => {
       // Publish answer with signature
       await ctx.molphaProgram.methods
         .publishAnswer(answer)
-        .accounts({
+        .accountsPartial({
           feed: feedPDA,
           nodeRegistry: ctx.nodeRegistryPDA,
           protocolConfig: ctx.protocolConfigPDA,
@@ -424,9 +425,7 @@ describe("Subscription Integration Tests", () => {
       const dataSourceInfo = createTestDataSourceInfo(
         testDataSource.dataSourceType,
         testDataSource.source,
-        testDataSource.address,
-        testDataSource.name,
-        testDataSource.signature
+        testDataSource.name
       );
 
       // Create feed with minimum valid subscription duration
@@ -436,17 +435,20 @@ describe("Subscription Integration Tests", () => {
       await ctx.molphaProgram.methods
         .createFeed(
           shortFeedParams,
-          dataSourceInfo,
           subscriptionDurationSeconds,
           priorityFeeBudget
         )
-        .accounts({
+        .accountsPartial({
           feed: shortFeedPDA,
           dataSource: dataSourcePDA,
-          ethLinkPda: null,
           authority: ctx.authority.publicKey,
           protocolConfig: ctx.protocolConfigPDA,
+          userTokenAccount: ctx.userTokenAccount,
+          programTokenAccount: ctx.programTokenAccount,
+          underlyingToken: ctx.underlyingTokenMint,
           systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .rpc();
 
@@ -455,14 +457,14 @@ describe("Subscription Integration Tests", () => {
 
       // Try to publish answer
       const answer = {
-        value: Buffer.from("12345678901234567890123456789012"), // 32 bytes
+        value: Array.from(Buffer.from("12345678901234567890123456789012")), // 32 bytes
         timestamp: await safePastOnchainTimestamp(ctx.provider, 30), // Use timestamp 30 seconds in the past
       };
 
       try {
         await ctx.molphaProgram.methods
           .publishAnswer(answer)
-          .accounts({
+          .accountsPartial({
             feed: shortFeedPDA,
             nodeRegistry: ctx.nodeRegistryPDA,
             protocolConfig: ctx.protocolConfigPDA,

@@ -1,4 +1,8 @@
 use anchor_lang::prelude::*;
+use anchor_spl::{
+    associated_token::AssociatedToken,
+    token_interface::{Mint, TokenAccount, TokenInterface, TransferChecked, transfer_checked},
+};
 use crate::error::FeedError;
 use crate::events::SubscriptionExtended;
 use crate::state::{Feed, ProtocolConfig};
@@ -8,9 +12,6 @@ pub fn extend_subscription(
     additional_duration_seconds: u64,
     additional_priority_fee_budget: u64,
 ) -> Result<()> {
-    // Get feed account info before mutable borrow
-    let feed_account_info = ctx.accounts.feed.to_account_info();
-    
     let feed = &mut ctx.accounts.feed;
 
     require!(
@@ -32,15 +33,17 @@ pub fn extend_subscription(
     feed.subscription_due_time = new_due_datetime;
     feed.priority_fee_allowance += additional_priority_fee_budget;
 
-    // Transfer payment
-    let cpi_context = CpiContext::new(
-        ctx.accounts.system_program.to_account_info(),
-        anchor_lang::system_program::Transfer {
-            from: ctx.accounts.authority.to_account_info(),
-            to: feed_account_info,
-        },
-    );
-    anchor_lang::system_program::transfer(cpi_context, total_extension_cost)?;
+    // Transfer tokens from user to program token account
+    let decimals = ctx.accounts.underlying_token.decimals;
+    let cpi_accounts = TransferChecked {
+        from: ctx.accounts.user_token_account.to_account_info(),
+        to: ctx.accounts.program_token_account.to_account_info(),
+        authority: ctx.accounts.authority.to_account_info(),
+        mint: ctx.accounts.underlying_token.to_account_info(),
+    };
+    let cpi_program = ctx.accounts.token_program.to_account_info();
+    let cpi_context = CpiContext::new(cpi_program, cpi_accounts);
+    transfer_checked(cpi_context, total_extension_cost, decimals)?;
     
     feed.balance += total_extension_cost;
 
@@ -76,5 +79,33 @@ pub struct ExtendSubscription<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
     
+    /// User's associated token account to transfer tokens from
+    #[account(
+        mut,
+        associated_token::mint = underlying_token,
+        associated_token::authority = authority,
+    )]
+    pub user_token_account: InterfaceAccount<'info, TokenAccount>,
+    
+    /// Program's associated token account to receive tokens
+    #[account(
+        mut,
+        associated_token::mint = underlying_token,
+        associated_token::authority = protocol_config,
+    )]
+    pub program_token_account: InterfaceAccount<'info, TokenAccount>,
+    
+    /// Protocol config to get the underlying token authority
+    #[account(
+        seeds = [ProtocolConfig::SEED_PREFIX],
+        bump,
+    )]
+    pub protocol_config: Account<'info, ProtocolConfig>,
+    
+    /// The underlying token mint
+    pub underlying_token: InterfaceAccount<'info, Mint>,
+    
     pub system_program: Program<'info, System>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
 }

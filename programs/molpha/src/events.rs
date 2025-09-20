@@ -3,9 +3,10 @@ use anchor_lang::prelude::*;
 
 #[event]
 pub struct DataSourceCreated {
-    pub id: [u8; 32],
-    pub owner_eth: [u8; 20],
+    pub id: Pubkey,
+    pub owner: Pubkey,
     pub data_source_type: DataSourceType,
+    pub metadata_hash: [u8; 32],
     pub created_at: i64,
 }
 
@@ -17,7 +18,7 @@ pub struct FeedCreated {
     pub min_signatures_threshold: u8,
     pub frequency: u64,
     pub ipfs_cid: String,
-    pub data_source_id: [u8; 32],
+    pub data_source: Pubkey,
     pub created_at: i64,
     pub subscription_due_time: i64,
     pub base_cost: u64,

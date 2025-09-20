@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 const anchor = require("@coral-xyz/anchor");
-const { SystemProgram } = require("@solana/web3.js");
+const { SystemProgram, PublicKey } = require("@solana/web3.js");
+const { getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } = require("@solana/spl-token");
 const fs = require("fs");
 
 // Setup environment variables if not set
@@ -20,12 +21,21 @@ function setupEnvironment() {
 
 async function main() {
   // Parse command line arguments
-  const feePerUpdate = process.argv[2] ? parseInt(process.argv[2]) : 1000; // Default 1000 lamports
-  
-  if (isNaN(feePerUpdate) || feePerUpdate < 0) {
-    console.error("❌ Error: Invalid fee amount");
-    console.log("Example: node initialize.js 1000");
-    console.log("Default fee: 1000 lamports");
+  const underlyingTokenMint = process.argv[2];// || "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"; // Default USDC
+  console.log("Using underlying token mint:", underlyingTokenMint);
+
+  if (!underlyingTokenMint) {
+    console.error("❌ Error: Underlying token mint is required");
+    console.log("Usage: node initialize.js <TOKEN_MINT_ADDRESS>");
+    console.log("Example: node initialize.js EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+    process.exit(1);
+  }
+
+  let underlyingToken;
+  try {
+    underlyingToken = new PublicKey(underlyingTokenMint);
+  } catch (e) {
+    console.error("❌ Error: Invalid token mint address");
     process.exit(1);
   }
 
@@ -37,6 +47,7 @@ async function main() {
     anchor.setProvider(provider);
 
     const program = anchor.workspace.Molpha;
+    console.log("Program ID:", program.programId.toString());
     
     // Derive PDAs
     const [nodeRegistryPDA] = anchor.web3.PublicKey.findProgramAddressSync(
@@ -49,10 +60,18 @@ async function main() {
       program.programId
     );
 
+    // Derive program token account
+    const programTokenAccount = getAssociatedTokenAddressSync(
+      underlyingToken,
+      protocolConfigPDA,
+      true // allowOwnerOffCurve
+    );
+
     console.log("🔍 Initializing Molpha Protocol with:");
-    console.log("Fee per update:", feePerUpdate, "lamports");
+    console.log("Underlying token:", underlyingToken.toString());
     console.log("NodeRegistry PDA:", nodeRegistryPDA.toString());
     console.log("ProtocolConfig PDA:", protocolConfigPDA.toString());
+    console.log("Program token account:", programTokenAccount.toString());
     console.log("Authority:", provider.wallet.publicKey.toString());
     console.log("RPC URL:", provider.connection.rpcEndpoint);
     console.log("");
@@ -89,24 +108,28 @@ async function main() {
       console.log("NodeRegistry:");
       console.log("- Authority:", nodeRegistry.authority.toString());
       console.log("- Nodes count:", nodeRegistry.nodes.length);
-      
+
       console.log("ProtocolConfig:");
       console.log("- Authority:", protocolConfig.authority.toString());
-      console.log("- Fee per update:", protocolConfig.feePerUpdate.toString(), "lamports");
+      console.log("- Underlying token:", protocolConfig.underlyingToken.toString());
       console.log("- Base price per second:", protocolConfig.basePricePerSecondScaled.toString());
       
       return;
     }
 
     console.log("🔄 Initializing protocol...");
-    console.log("Fee per update:", feePerUpdate, "lamports");
+    console.log("Underlying token:", underlyingToken.toString());
     const txSignature = await program.methods
       .initialize()
       .accounts({
         nodeRegistry: nodeRegistryPDA,
         protocolConfig: protocolConfigPDA,
+        underlyingToken: underlyingToken,
+        programTokenAccount: programTokenAccount,
         authority: provider.wallet.publicKey,
         systemProgram: SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       })
       .rpc();
 
@@ -124,11 +147,12 @@ async function main() {
       console.log("- PDA:", nodeRegistryPDA.toString());
       console.log("- Authority:", nodeRegistry.authority.toString());
       console.log("- Nodes count:", nodeRegistry.nodes.length);
-      
+
       console.log("ProtocolConfig:");
       console.log("- PDA:", protocolConfigPDA.toString());
       console.log("- Authority:", protocolConfig.authority.toString());
-      console.log("- Fee per update:", protocolConfig.feePerUpdate.toString(), "lamports");
+      console.log("- Underlying token:", protocolConfig.underlyingToken.toString());
+      console.log("- Program token account:", programTokenAccount.toString());
       console.log("- Base price per second:", protocolConfig.basePricePerSecondScaled.toString());
       console.log("- Reward percentage:", protocolConfig.rewardPercentage.toString(), "basis points");
       

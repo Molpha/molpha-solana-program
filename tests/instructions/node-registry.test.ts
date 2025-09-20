@@ -23,7 +23,7 @@ describe("Node Registry Instructions", () => {
       const nodeToAdd = ctx.nodes[0];
       await ctx.molphaProgram.methods
         .addNode(nodeToAdd.publicKey)
-        .accounts({
+        .accountsPartial({
           nodeRegistry: ctx.nodeRegistryPDA,
           authority: ctx.authority.publicKey,
         })
@@ -43,7 +43,7 @@ describe("Node Registry Instructions", () => {
       try {
         await ctx.molphaProgram.methods
           .addNode(nodeToAdd.publicKey)
-          .accounts({
+          .accountsPartial({
             nodeRegistry: ctx.nodeRegistryPDA,
             authority: ctx.authority.publicKey,
           })
@@ -63,7 +63,7 @@ describe("Node Registry Instructions", () => {
       const nodeToRemove = ctx.nodes[0];
       await ctx.molphaProgram.methods
         .removeNode(nodeToRemove.publicKey)
-        .accounts({
+        .accountsPartial({
           nodeRegistry: ctx.nodeRegistryPDA,
           authority: ctx.authority.publicKey,
         })
